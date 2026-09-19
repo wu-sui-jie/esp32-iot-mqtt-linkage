@@ -4,10 +4,10 @@
 //  协议公共层
 //
 //  按《MQTT 通信协议规范_第1组》V2.0 实现「信封 + 载荷」两层的
-//  构造与解析。本组 4 块板（1 号 servo、4 号 sht30、5 号 rgb、
-//  7 号 tts）各有一份【完全相同】的副本，改一份要同步其余三份，
-//  同步后这样确认一致：
-//      diff 吴遂杰/舵机/src/mqtt_proto.cpp 吴遂杰/智能语音/src/mqtt_proto.cpp
+//  构造与解析。本组每个工程各有一份【完全相同】的副本，
+//  改一份必须同步其余全部，同步后这样确认一致（在
+//  ESP32嵌入式开发/ 目录下执行）：
+//      for d in */; do diff -q "$d/src/mqtt_proto.cpp" 舵机/src/mqtt_proto.cpp; done
 //
 //  本文件不依赖具体的 MQTT 库，所有库相关的调用都关在
 //  mqtt_proto.cpp 里。将来若要换库，只改那一个文件。
@@ -97,3 +97,15 @@ bool proto_connected();
 // ============================================================
 JsonArray proto_dat_samples();
 bool proto_send_dat(const char *device);
+
+// ============================================================
+//  事件上报（type = evt）
+//
+//  用法：
+//      proto_send_evt("ir_beam", "blocked", 2);
+//
+//  level 为事件等级 0~3（协议表 5）：0 恢复、1 提示、2 警告、3 紧急。
+//  协议表 18 规定 evt 与 ack 一样用 QoS 1，不允许丢失。
+//  上报周期与去抖参数见协议表 19。
+// ============================================================
+bool proto_send_evt(const char *device, const char *event, int level);

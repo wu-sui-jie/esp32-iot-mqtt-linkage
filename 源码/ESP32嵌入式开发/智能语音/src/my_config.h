@@ -16,10 +16,10 @@
 // 课堂例程没踩到，是因为它把 #include <WiFi.h> 写在了
 // #include "my_config.h" 前面；而本工程的 mqtt_proto.h 是先包含
 // my_config.h 的，所以必须改名，不能靠包含顺序。
-#define WIFI_SSID "wusuijie"       // WiFi账号
-#define WIFI_PASSWORD "11111111"   // WiFi密码
-#define mqttServer "yunyismart.tech" // MQTT服务器地址
-#define mqttPort 1883                // MQTT服务器端口号
+#define WIFI_SSID     "wusuijie"        // WiFi账号
+#define WIFI_PASSWORD "11111111"        // WiFi密码
+#define MQTT_SERVER   "yunyismart.tech" // MQTT服务器地址
+#define MQTT_PORT     1883              // MQTT服务器端口号
 
 // ================ 本组编号与主题定义 ================
 // 前缀 = 课程空间前缀 202609_PP2 + 组号 1
@@ -29,7 +29,8 @@
 #define TOPIC_ONLINE "202609_PP2/1/online" // 上行：上线下线，Retain（本板旁听）
 
 // ================ 本设备板号（1~8，按协议表 7） ================
-#define ID 7
+#define BOARD_ID 7
+#define BOARD_ID_STR "7"
 
 // ================ 设备标识（协议表 7） ================
 #define DEV_TTS "tts"
