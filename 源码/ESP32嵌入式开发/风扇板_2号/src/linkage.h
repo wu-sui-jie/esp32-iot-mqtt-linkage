@@ -1,0 +1,24 @@
+#pragma once
+
+#include <Arduino.h>
+#include <ArduinoJson.h>
+
+// ============================================================
+//  2 号板：本地联动
+//
+//  旁听 report 主题，4 号板的温湿度一超标就自己把风扇打开，
+//  不经过平台。现场演示时响应比"传感器 → 平台 → 执行器"快得多，
+//  平台或网络出状况也照样能动。
+//
+//  触发规则与迟滞设计见 linkage.cpp 顶部。
+// ============================================================
+
+// 收到非 cmd 报文（evt / dat / sys）时的联动判断入口。
+// 调用链：mqtt_proto.cpp 的回调 → proto_on_other()（弱符号）
+//        → linkage.cpp 里的强定义 → 本函数。
+void linkage_on_message(const char *type, const char *src, JsonObjectConst body);
+
+// 主循环里每次都要调用：执行开关动作、处理迟滞、上报联动事件。
+// 【为什么动作不直接在回调里做】arduino-mqtt 规定回调里不能
+// publish（会死锁），而联动要发 auto_on / auto_off 上报，所以挪到这里。
+void linkage_loop();

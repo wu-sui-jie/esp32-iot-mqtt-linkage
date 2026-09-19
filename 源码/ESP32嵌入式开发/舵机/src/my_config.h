@@ -57,10 +57,23 @@
 #define SERVO_STEP_DEG 1 // 每步走多少度
 #define SERVO_STEP_MS 10 // 每步间隔多少毫秒
 
+// ================ 对射联动的参数 ================
+// 3 号板检测到光束被遮挡时，本板自动把舵机转过去；光束恢复后转回原位。
+// 这是本模块的个性化功能：不经过平台，板子自己完成判断与动作，
+// 所以现场演示时响应更快，平台或网络出状况也照样能动。
+#define LINK_SERVO_BLOCKED_DEG 0    // 遮挡时转到（0°）
+#define LINK_SERVO_CLEAR_DEG 90     // 恢复时回到（中位 90°）
+
 // ================ 协议层开关（定义见 mqtt_proto.h） ================
 #define ACK_AFTER_DONE 1   // 转动到位之后才回执（协议表 19）
-#define SUB_EXTRA_REPORT 0 // 本板不订阅 report，避免自回环
+#define SUB_EXTRA_REPORT 1 // 联动旁听：接收 3 号板的遮挡事件
 #define SUB_EXTRA_ONLINE 0 // 本板不订阅 online
+
+// 【关于订阅 report】协议 §8.4 一般约定各板不订阅 report 以避免自回环。
+// 本板为了联动有意偏离这一条，自回环已由协议层彻底堵死：
+// mqtt_proto.cpp 的回调第一件事就是丢掉 src 等于本板板号的报文，
+// 所以本板永远不会处理自己发出去的 ack。
+// 把上面这个宏改成 0 即可退回成只订阅 cmd 的普通执行器。
 
 // ================ MQTT 接收缓冲区 ================
 // arduino-mqtt 默认只有 128 字节，协议里带 param 的报文可能超过，

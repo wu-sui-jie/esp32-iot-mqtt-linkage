@@ -2,17 +2,20 @@
 #include "my_config.h"
 #include "mqtt_proto.h"
 #include "fan.h"
+#include "linkage.h"
 
 // ============================================================
 //  2 号板：继电器（风扇）模块（执行器）
 //
 //  收 cmd → 校验 on → 开关风扇 → 回 ack。
-//  本板没有周期数据要上报，loop 里只有协议层。
+//  本板没有周期数据要上报。
+//
+//  另有本地联动：4 号板温湿度超标时本板自动开风扇，见 linkage.cpp。
 //
 //  【迁移说明】本工程原先用 PubSubClient 写成单文件 main.cpp。
 //  协议 §8.2 要求 ack 用 QoS 1，而 PubSubClient 的 publish()
 //  只能发 QoS 0，所以改用 256dpi/MQTT 并拆成
-//  my_config.h + mqtt_proto + fan + main 的四层结构，
+//  my_config.h + mqtt_proto + fan + linkage + main 的分层结构，
 //  与其余各板的命名和分层保持一致。风扇的控制逻辑未变。
 // ============================================================
 
@@ -76,6 +79,7 @@ void setup()
 
 void loop()
 {
-    proto_loop(); // MQTT 收发 + 回执
+    proto_loop();   // MQTT 收发 + 回执
+    linkage_loop(); // 温湿度联动的开关动作与上报
     // 风扇是纯开关负载，没有需要按帧刷新的东西，所以没有 fan_loop()
 }

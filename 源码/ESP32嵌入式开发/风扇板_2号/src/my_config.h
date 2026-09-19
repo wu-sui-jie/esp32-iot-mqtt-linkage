@@ -47,11 +47,32 @@
 #define FAN_FREQ 5000    // PWM 频率 5 kHz
 #define FAN_RESOLUTION 8 // 8 位分辨率，占空比 0~255
 
+// ================ 温湿度联动的参数 ================
+// 4 号板报来的温度或湿度超过开阈值就自动开风扇；回到关阈值以下
+// 并持续 LINK_FAN_HOLD_MS 之后才关。
+//
+// 【开/关阈值必须分开（迟滞）】只用一个阈值的话，读数在阈值附近
+// 来回抖动时继电器会"啪嗒啪嗒"反复吸合，既吵又伤触点。
+#define LINK_TEMP_ON 30.0f  // 温度达到多少就开风扇（协议范围 -40.0~125.0）
+#define LINK_TEMP_OFF 28.0f // 温度降到多少以下才算恢复正常
+#define LINK_HUMI_ON 80.0f  // 湿度达到多少就开风扇（协议范围 0.0~100.0）
+#define LINK_HUMI_OFF 75.0f // 湿度降到多少以下才算恢复正常
+
+// 条件恢复正常后，再持续这么久才真的关风扇，
+// 避免传感器偶尔跳一个数就让风扇跟着启停一次。
+#define LINK_FAN_HOLD_MS 10000UL
+
 // ================ 协议层开关（定义见 mqtt_proto.h） ================
 // 本板动作是瞬时的（一个 ledcWrite 就完成），收到命令立即回执。
-#define ACK_AFTER_DONE 0    // 无长动作，立即回执
-#define SUB_EXTRA_REPORT 0  // 联动开关，阶段 4 打开
-#define SUB_EXTRA_ONLINE 0  // 不需要旁听上下线
+#define ACK_AFTER_DONE 0   // 无长动作，立即回执
+#define SUB_EXTRA_REPORT 1 // 联动旁听：接收 4 号板的温湿度数据
+#define SUB_EXTRA_ONLINE 0 // 不需要旁听上下线
+
+// 【关于订阅 report】协议 §8.4 一般约定各板不订阅 report 以避免自回环。
+// 本板为了联动有意偏离这一条，自回环已由协议层彻底堵死：
+// mqtt_proto.cpp 的回调第一件事就是丢掉 src 等于本板板号的报文，
+// 本板永远不会处理自己发出去的 ack。
+// 把上面这个宏改成 0 即可退回成只订阅 cmd 的普通执行器。
 
 // ================ MQTT 接收缓冲区 ================
 // arduino-mqtt 默认只有 128 字节，协议里带 param 的报文可能超过，
