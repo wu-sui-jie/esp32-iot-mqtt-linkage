@@ -1,3 +1,19 @@
+// ==========================================================
+//  7 号板 · 智能语音播报（tts） · 本地联动
+//  文件：linkage.cpp
+//
+//  这是本模块区别于别的执行器的地方：不只等平台下命令，还会【听】
+//  其他板子在干什么，然后用自己的话播报出来。
+//
+//  三层播报结构：
+//    第一层  事件即时播报（evt / sys / ack）   状态一变立刻播
+//    第二层  阈值告警（dat 越界）              带冷却，防刷屏
+//    第三层  周期数据汇总（dat 快照）          最低优先，空闲才播
+//
+//  各层内部的设计（火焰轮次播报、上下线合并播报、快照新鲜度、
+//  冷却与优先级、为什么回调里只入队）在文件内各段注释里说明。
+// ==========================================================
+
 #include "linkage.h"
 #include "my_config.h"
 #include "tts.h"
@@ -106,6 +122,7 @@ static bool say_rule_cd(Rule r, const char *text, uint8_t level, uint32_t cooldo
     return tts_say(text, level);
 }
 
+// 按等级取默认冷却时间后播报
 static void say_rule(Rule r, const char *text, uint8_t level)
 {
     say_rule_cd(r, text, level, cooldown_of(level));
@@ -307,6 +324,7 @@ static bool flame_alarming = false;   // 本轮火焰是否已播过告警
 static uint32_t last_flame_rx_ms = 0; // 上一条 detected 的到达时刻
 static uint32_t last_flame_say_ms = 0;// 上一次播"检测到火焰"的时刻
 
+// 火焰按轮次播报，不按报文条数——6 号板每 5 秒的重发不算新事件
 static void on_evt_flame(const char *ev)
 {
     if (strcmp(ev, "detected") == 0)
@@ -348,6 +366,7 @@ static void on_evt_flame(const char *ev)
     }
 }
 
+// evt 总入口：火焰 / 对射 / 舵机联动 / 风扇联动 / 照明场景
 static void on_evt(JsonObjectConst body)
 {
     const char *device = body["device"] | "";
@@ -473,6 +492,7 @@ static void on_dat(JsonObjectConst body)
 static int last_servo_deg = -1; // 上一次播报过的角度，用来抑制重复
 #endif
 
+// 平台命令的舵机动作播报，角度从 ack 的 param.angle 里读
 static void on_ack(JsonObjectConst body)
 {
 #if TTS_ANNOUNCE_SERVO
@@ -573,6 +593,7 @@ static void build_summary(char *out, size_t n)
     out[n - 1] = '\0';
 }
 
+// 周期汇总：到点且空闲时，把各模块最新值合成一句播报
 static void summary_tick()
 {
     if (millis() - last_summary_ms < SUMMARY_PERIOD_MS)
@@ -629,6 +650,7 @@ void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
 #endif
 }
 
+// 合并窗口到点就播上下线；随后看看要不要播一轮周期汇总
 void linkage_loop()
 {
 #if TTS_LOCAL_LINKAGE

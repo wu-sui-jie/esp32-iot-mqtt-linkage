@@ -1,3 +1,20 @@
+// ==========================================================
+//  协议公共层 · 实现（八块板共用同一份）
+//  文件：mqtt_proto.cpp
+//
+//  本文件是全工程唯一依赖 MQTT 库的地方，换库只改这里：
+//    · WiFi 与 MQTT 的连接、断线重连、遗嘱设置
+//    · 收到报文后的信封校验与分流（cmd 入队，其余交给 proto_on_other）
+//    · 发送序号维护，ack / dat / evt / sys 的组包与发布
+//    · device_busy() 与 proto_on_other() 两个弱符号钩子的默认实现
+//
+//  【回调里不能 publish】arduino-mqtt 规定在消息回调里调用
+//  publish / subscribe 会死锁，所以回调只做解析与入队，
+//  真正的发送都放在 proto_loop() 里做。
+//
+//  【八份副本必须逐字节一致】改一份要同步其余七份。
+// ==========================================================
+
 #include "mqtt_proto.h"
 
 #include <WiFi.h>
@@ -25,6 +42,7 @@ static MQTTClient client(MQTT_BUF_SIZE, MQTT_BUF_SIZE);
 // 由本板独立计数，从 1 开始，到 SEQ_MAX 后回到 1（协议表 2）
 static uint32_t tx_seq = 1;
 
+// 取下一个发送序号。从 1 开始自增，到达上限后回到 1（协议表 2）
 static int next_seq()
 {
     int s = (int)tx_seq;
@@ -74,6 +92,7 @@ __attribute__((weak)) bool device_busy()
     return false;
 }
 
+// 弱符号默认实现：不订阅 report / online 的板用不到这个钩子
 __attribute__((weak)) void proto_on_other(const char *type, const char *src,
                                           JsonObjectConst body)
 {
@@ -175,6 +194,7 @@ static bool publish_doc(JsonDocument &doc, const char *topic, bool retain, int q
     return publish_to(topic, buf, retain, qos);
 }
 
+// 发布到主题的最后一层封装，失败时打印库返回的错误码
 static bool publish_to(const char *topic, const char *payload, bool retain, int qos)
 {
     bool ok = client.publish(topic, payload, retain, qos);
@@ -345,6 +365,7 @@ static void proto_connect()
     publish_online();
 }
 
+// 连 WiFi、连 MQTT、订阅主题、发布上线通知。setup() 里第一个调用
 void proto_init()
 {
     Serial.begin(115200);
@@ -366,11 +387,13 @@ void proto_init()
     proto_connect();
 }
 
+// 当前是否已连上 MQTT
 bool proto_connected()
 {
     return client.connected();
 }
 
+// 主循环里每次都要调用：断线重连、收报文、发出待回执
 void proto_loop()
 {
     if (!client.connected())
@@ -400,6 +423,7 @@ JsonArray proto_dat_samples()
     return b.createNestedArray("samples");
 }
 
+// 把 proto_dat_samples() 填好的数据发布出去（QoS 0，不保留）
 bool proto_send_dat(const char *device)
 {
     dat_doc["seq"] = next_seq();
@@ -417,6 +441,7 @@ bool proto_send_dat(const char *device)
 // ============================================================
 static StaticJsonDocument<256> evt_doc;
 
+// 上报一条事件（QoS 1，不保留）：设备名、事件名、等级 0~3
 bool proto_send_evt(const char *device, const char *event, int level)
 {
     evt_doc.clear();

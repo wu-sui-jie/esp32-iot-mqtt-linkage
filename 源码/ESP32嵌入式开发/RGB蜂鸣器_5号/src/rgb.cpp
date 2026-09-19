@@ -1,3 +1,15 @@
+// ==========================================================
+//  5 号板 · ADC/RGB/蜂鸣器（rgb、buzzer）
+//  文件：rgb.cpp
+//
+//  两种工作方式：
+//    · 纯色（rgb_apply）       平台下发 set_color、光照联动的照明
+//    · 火焰循环（rgb_set_fire）火焰联动的多彩报警，按帧刷新
+//
+//  火焰循环需要主循环反复调用 rgb_loop() 推进动画；纯色一设就保持。
+//  协议依据：表 12（RGB 数据点）。
+// ==========================================================
+
 #include "rgb.h"
 
 #if HAS_RGB
@@ -36,6 +48,7 @@ static bool fire_active = false;
 static uint8_t fire_step = 0;
 static unsigned long last_fire_ms = 0;
 
+// 初始化灯带，上电先全灭
 void rgb_init()
 {
     strip.begin();
@@ -46,6 +59,7 @@ void rgb_init()
     rgb_apply(0, 0, 0); // 上电先全灭
 }
 
+// 设置纯色。三通道全 0 即熄灭（协议 §5.5 不单独定义开关命令）
 void rgb_apply(uint8_t r, uint8_t g, uint8_t b)
 {
     cur_r = r;
@@ -60,6 +74,7 @@ void rgb_apply(uint8_t r, uint8_t g, uint8_t b)
                   r, g, b, (r == 0 && g == 0 && b == 0) ? "（熄灭）" : "");
 }
 
+// 开 / 关火焰循环动画。开启时从第一帧开始
 void rgb_set_fire(bool on)
 {
     if (on == fire_active)
@@ -79,11 +94,13 @@ void rgb_set_fire(bool on)
     }
 }
 
+// 火焰循环是否在运行
 bool rgb_fire_active()
 {
     return fire_active;
 }
 
+// 推进火焰动画：每 FIRE_STEP_MS 换一色；没有动画时立即返回
 void rgb_loop()
 {
     if (!fire_active)

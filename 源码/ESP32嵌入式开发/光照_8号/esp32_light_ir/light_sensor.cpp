@@ -1,3 +1,17 @@
+// ==========================================================
+//  8 号板 · 光照度传感器（light_sensor）
+//  文件：light_sensor.cpp
+//
+//  支持两种传感器，上电自动识别：
+//    · BH1750（I2C）   数字传感器，直接给出 lx
+//    · 光敏电阻（ADC） 没有 BH1750 时回退，按 ADC 读数粗略换算
+//
+//  BH1750 读取失败时跳过本周期，而不是回退到光敏电阻——
+//  用 BH1750 时通常根本没接光敏电阻，那一路读的是悬空引脚的噪声。
+//
+//  协议依据：表 15（光照度数据点）。
+// ==========================================================
+
 #include "light_sensor.h"
 #include "mqtt_proto.h"
 
@@ -120,6 +134,7 @@ void light_sensor_init()
     last_report_ms = millis();
 }
 
+// 重连补报与周期采集上报
 void light_sensor_loop()
 {
     unsigned long now = millis();
@@ -158,11 +173,13 @@ void light_sensor_loop()
     Serial.printf("[light] 光照度 %.1f lx\n", lux);
 }
 
+// 最近一次有效读数。还没读到有效值时为 -1
 float light_sensor_lux()
 {
     return last_lux;
 }
 
+// 是否识别到 BH1750（false 表示在用光敏电阻）
 bool light_sensor_is_bh1750()
 {
     return use_bh1750;

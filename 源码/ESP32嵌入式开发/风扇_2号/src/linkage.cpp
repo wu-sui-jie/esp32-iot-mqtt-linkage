@@ -1,3 +1,16 @@
+// ==========================================================
+//  2 号板 · 继电器（风扇）（fan） · 本地联动
+//  文件：linkage.cpp
+//
+//  旁听 report 主题，4 号板的温湿度一超标就自动开风扇，不经过平台。
+//
+//  规则：温度 ≥ LINK_TEMP_ON 或湿度 ≥ LINK_HUMI_ON 开风扇；
+//        两者都回落到 OFF 阈值以下并持续 LINK_FAN_HOLD_MS 才关。
+//
+//  开 / 关阈值分开是迟滞，避免读数在阈值附近抖动时继电器反复吸合。
+//  平台手动开关风扇永远有效，联动不会去覆盖它。
+// ==========================================================
+
 #include "linkage.h"
 #include "my_config.h"
 #include "mqtt_proto.h"
@@ -101,6 +114,7 @@ void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
         on_dat(body);
 }
 
+// 条件超标就开风扇；恢复正常并持续够久之后才关
 void linkage_loop()
 {
     unsigned long now = millis();

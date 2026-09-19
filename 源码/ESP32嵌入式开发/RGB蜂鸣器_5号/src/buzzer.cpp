@@ -1,3 +1,16 @@
+// ==========================================================
+//  5 号板 · ADC/RGB/蜂鸣器（rgb、buzzer）
+//  文件：buzzer.cpp
+//
+//  三种鸣叫方式由一个状态机统管，不让多个来源各自去写硬件：
+//    · 持续（set_power）  协议表 12 的必做项
+//    · 定时（beep）       协议表 20 的选做项，50~5000 毫秒
+//    · 间歇报警           火焰联动用，响 300ms 停 300ms
+//
+//  【所有的"停"都是记时刻，不是 delay】beep 最长 5 秒，
+//  用 delay 会把主循环卡死，MQTT 会掉线。
+// ==========================================================
+
 #include "buzzer.h"
 
 #if HAS_BUZZER
@@ -66,6 +79,7 @@ void buzzer_init()
                   BUZZER_PIN, BUZZER_USE_PWM ? "方波" : "电平");
 }
 
+// 持续鸣叫 / 停止（协议表 12）
 void buzzer_set_power(bool on)
 {
     // 持续鸣叫会顶掉定时鸣叫与间歇报警
@@ -77,6 +91,7 @@ void buzzer_set_power(bool on)
     Serial.printf("[buzzer] %s\n", on ? "持续鸣叫" : "停止");
 }
 
+// 定时鸣叫，到点自动停（协议表 20，50~5000 毫秒）
 void buzzer_beep(unsigned int duration_ms)
 {
     // 协议表 20 规定时长范围 50~5000 毫秒，越界钳位而不是报错：
@@ -95,6 +110,7 @@ void buzzer_beep(unsigned int duration_ms)
     Serial.printf("[buzzer] 鸣叫 %u 毫秒\n", duration_ms);
 }
 
+// 开 / 关间歇报警（火焰联动用）
 void buzzer_set_alarm(bool on)
 {
     if (on == alarm_on)
@@ -117,6 +133,7 @@ void buzzer_set_alarm(bool on)
     }
 }
 
+// 处理定时鸣叫的停止与间歇报警的节拍
 void buzzer_loop()
 {
     unsigned long now = millis();
@@ -145,6 +162,7 @@ void buzzer_loop()
     }
 }
 
+// 当前是否在发声
 bool buzzer_is_on()
 {
     return sounding;

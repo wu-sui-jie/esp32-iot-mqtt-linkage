@@ -1,3 +1,17 @@
+// ==========================================================
+//  1 号板 · 舵机模块（servo） · 本地联动
+//  文件：linkage.cpp
+//
+//  旁听 report 主题，3 号板的光束遮挡事件一到，本板就把舵机转过去，
+//  不经过平台：响应更快，平台或网络出状况也照样能动。
+//
+//  规则表（改动请同步 readme）：
+//    3 号 ir_beam  evt blocked  →  舵机转到 LINK_SERVO_BLOCKED_DEG
+//    3 号 ir_beam  evt clear    →  舵机回到 LINK_SERVO_CLEAR_DEG
+//
+//  只认状态跳变：3 号板每 30 秒的心跳 evt 不会让舵机重复转动。
+// ==========================================================
+
 #include "linkage.h"
 #include "my_config.h"
 #include "mqtt_proto.h"
@@ -68,6 +82,7 @@ void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
         on_evt(body);
 }
 
+// 状态变了就驱动舵机，并广播一条联动事件
 void linkage_loop()
 {
     if (!need_update)

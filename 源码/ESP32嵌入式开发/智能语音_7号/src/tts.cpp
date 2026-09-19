@@ -1,3 +1,17 @@
+// ==========================================================
+//  7 号板 · 智能语音播报（tts）
+//  文件：tts.cpp
+//
+//  UTF-8 → GB2312 转码、0xFD 帧封装、带优先级的播报队列。
+//
+//    · 语音模块只认 GB2312，少这一步转码会念出杂音
+//    · 高等级播报可打断低等级，同等级排队，队列满时丢最低等级
+//    · 入队前查重，同一句话不会念两遍
+//
+//  【回调里只入队】串口下发统一放在 tts_loop() 里做。
+//  协议依据：表 14（语音播报数据点）。
+// ==========================================================
+
 #include "tts.h"
 #include "my_config.h"
 
@@ -169,6 +183,7 @@ void tts_init()
     tts_say("语音播报模块已启动，系统就绪", TTS_LEVEL_INFO);
 }
 
+// 请求播报一段文本。只入队，真正的串口下发在 tts_loop() 里做
 bool tts_say(const char *text, uint8_t level)
 {
     if (text == NULL || text[0] == '\0')
@@ -179,16 +194,19 @@ bool tts_say(const char *text, uint8_t level)
     return enqueue(text, level);
 }
 
+// 是否正在播报（按估算时长判断，模块不回传播放状态）
 bool tts_busy()
 {
     return (int32_t)(millis() - busy_until_ms) < 0;
 }
 
+// 队列里还排着几条，供周期汇总判断是否空闲
 int tts_queue_count()
 {
     return q_count;
 }
 
+// 从队列里挑等级最高的一条下发，必要时抢占正在播的低等级
 void tts_loop()
 {
     if (q_count == 0)

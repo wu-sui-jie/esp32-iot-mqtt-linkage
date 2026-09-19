@@ -1,3 +1,16 @@
+// ==========================================================
+//  1 号板 · 舵机模块（servo）
+//  文件：servo.cpp
+//
+//  角度校验、非阻塞平滑转动状态机、板载 LED 转动指示。
+//
+//  【为什么不用 delay 一次转到位】主循环里跑着 MQTT 收发，一次卡住近 2 秒
+//  会收不到命令、回执延迟，卡久了还会被服务器判超时踢下线。
+//  所以转动拆成"每 10 毫秒走 1 度"，servo_loop() 每次只走一小步。
+//
+//  协议依据：表 8（舵机数据点）、表 19（执行完成后立即回执）。
+// ==========================================================
+
 #include "servo.h"
 #include "my_config.h"
 
@@ -34,6 +47,7 @@ static inline void led_moving(bool on)
     digitalWrite(PIN_LED1, on ? LOW : HIGH);
 }
 
+// 接上舵机、回到中位、配好转动指示 LED
 void servo_init()
 {
     pinMode(PIN_LED1, OUTPUT);
@@ -49,6 +63,7 @@ void servo_init()
     Serial.printf("[servo] 初始化完成，已回到中位 %d°\n", cur_deg);
 }
 
+// 受理一个目标角度（范围已由 main.cpp 校验过）
 bool servo_set_angle(int angle)
 {
     if (angle < SERVO_ANGLE_MIN || angle > SERVO_ANGLE_MAX)
@@ -67,16 +82,19 @@ bool servo_set_angle(int angle)
     return true;
 }
 
+// 是否还在转动。协议层据此决定这条命令的 ack 什么时候发
 bool servo_busy()
 {
     return cur_deg != tgt_deg;
 }
 
+// 当前角度（按步进轨迹推算）
 int servo_angle()
 {
     return cur_deg;
 }
 
+// 每次只走一小步就返回，绝不阻塞 MQTT 收发
 void servo_loop()
 {
     if (cur_deg == tgt_deg)

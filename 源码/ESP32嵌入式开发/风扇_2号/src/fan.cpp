@@ -1,3 +1,14 @@
+// ==========================================================
+//  2 号板 · 继电器（风扇）（fan）
+//  文件：fan.cpp
+//
+//  把"开 / 关"变成一次 ledcWrite。
+//
+//  继电器是开关型负载，不需要调速，所以 on 直接写满占空比、off 写 0，
+//  中间不设档位——协议表 9 只定义了开与关两种状态。
+//  上电默认停止，避免插拔电源时继电器"啪"地吸合一下，被误解成自己启动了。
+// ==========================================================
+
 #include "fan.h"
 
 #if HAS_FAN
@@ -15,6 +26,7 @@
 
 static bool fan_on = false;
 
+// 配好 PWM 通道，风扇从停止状态开始
 void fan_init()
 {
     ledcSetup(FAN_CHANNEL, FAN_FREQ, FAN_RESOLUTION);
@@ -25,6 +37,7 @@ void fan_init()
     Serial.println("[fan] 初始化完成，风扇处于停止状态");
 }
 
+// 开 / 关风扇：on 全速，off 停止
 void fan_set_power(bool on)
 {
     ledcWrite(FAN_CHANNEL, on ? 255 : 0);
@@ -33,6 +46,7 @@ void fan_set_power(bool on)
     Serial.printf("[fan] 风扇 %s\n", on ? "开（全速）" : "关");
 }
 
+// 当前开关状态，回执时回发实际状态用（协议表 9）
 bool fan_is_on()
 {
     return fan_on;

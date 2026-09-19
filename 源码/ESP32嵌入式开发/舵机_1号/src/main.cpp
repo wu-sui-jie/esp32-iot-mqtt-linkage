@@ -1,3 +1,13 @@
+// ==========================================================
+//  1 号板 · 舵机模块（servo）
+//  文件：main.cpp
+//
+//  程序入口。setup() 里初始化协议层与各功能模块，
+//  loop() 里依次驱动协议收发与各模块的状态机。
+//
+//  平台下发的命令由 handle_device_cmd() 分发到本板的具体模块。
+// ==========================================================
+
 #include <Arduino.h>
 #include "my_config.h"
 #include "mqtt_proto.h"
@@ -76,12 +86,14 @@ ProtoResult handle_device_cmd(const char *device, const char *action,
     return PROTO_OK;
 }
 
+// 上电初始化：先起协议层（含连网），再初始化本板的外设模块
 void setup()
 {
     proto_init(); // 连接 WiFi 与 MQTT（内部已 Serial.begin）
     servo_init(); // 接舵机、回中位、配 LED1
 }
 
+// 主循环：先驱动协议收发，再依次跑各模块的状态机
 void loop()
 {
     proto_loop();   // MQTT 收发 + 回执
