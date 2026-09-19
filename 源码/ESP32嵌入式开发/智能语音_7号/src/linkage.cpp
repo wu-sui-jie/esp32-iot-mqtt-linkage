@@ -132,6 +132,28 @@ struct Snapshot
 
 static Snapshot snap;
 
+// 开机静默期的起点。由 linkage_init() 在协议层初始化完成之后记录，
+// 不能用 millis() 直接算——原因见 linkage_init() 里的说明。
+static uint32_t mute_start_ms = 0;
+
+// ============================================================
+//  各板在线状态表
+//
+//  【为什么需要它】online 主题是 Retain 的：某块板掉线后，服务器会把
+//  它的 offline 报文一直保留着，直到这块板重新上线才被覆盖。而语音板
+//  每一次【重新订阅】（冷启动，或者与服务器断线重连）都会把服务器上
+//  当前保留的全部 online / offline 再收一遍。
+//
+//  不加区分地播报就会出现倒着的现象：设备一接电，先播一句"X 号设备
+//  已离线"，紧接着才播"已上线"。前一句其实是它上一次掉线时留下的
+//  旧报文，不是刚发生的事。
+//
+//  有了这张表就能分辨：只有"表里记着它在线、现在却收到 offline"
+//  才是真的掉线；表里本来就是离线（或压根没见过它），那收到的
+//  offline 就是服务器上的旧报文，不播。online 同理，重复的不播第二遍。
+// ============================================================
+static bool board_online[9] = {false}; // 下标 1~8 对应板号，0 不用
+
 // ============================================================
 //  sys：设备上下线（发布在 online 主题，Retain）
 // ============================================================
@@ -140,22 +162,50 @@ static void on_sys(const char *src, JsonObjectConst body)
     const char *ev = body["event"] | "";
     int board = atoi(src);
 
-    // 开机静默期：online 用了 Retain，本板一订阅就会把当前在线的板
-    // 全部推过来，不屏蔽的话开机就是一串"X 号设备已上线"。
-    if (millis() < ONLINE_MUTE_MS)
+    if (board < 1 || board > 8)
     {
-        Serial.printf("[link] 开机静默期内，忽略 %d 号板的 %s\n", board, ev);
+        Serial.printf("[link] sys 报文的 src 不是有效板号（\"%s\"），忽略\n", src);
         return;
     }
 
-    char text[48];
     if (strcmp(ev, "online") == 0)
     {
+        bool was_online = board_online[board];
+        board_online[board] = true; // 状态一定要更新，播不播是另一回事
+
+        if (was_online)
+        {
+            Serial.printf("[link] %d 号板重复的 online，不播报\n", board);
+            return;
+        }
+
+        // 开机静默期：冷启动订阅之后，服务器会把当前在线的板一股脑
+        // 推过来，不屏蔽的话开机就是一串"X 号设备已上线"。
+        // 【只挡播报，不挡上面那句状态更新】否则静默期内上线的板在表里
+        // 仍然记成离线，之后它真掉线时会被当成"旧报文"而不播。
+        if (millis() - mute_start_ms < ONLINE_MUTE_MS)
+        {
+            Serial.printf("[link] 静默期内，%d 号板上线只记录不播报\n", board);
+            return;
+        }
+
+        char text[48];
         snprintf(text, sizeof(text), "%d 号设备已上线", board);
         say_rule(R_ONLINE, text, TTS_LEVEL_INFO);
     }
     else if (strcmp(ev, "offline") == 0)
     {
+        if (!board_online[board])
+        {
+            // 表里本来就是离线：这是服务器保留的旧报文，不是刚发生的掉线
+            Serial.printf("[link] %d 号板本来就是离线，"
+                          "这条 offline 是服务器保留的旧报文，不播报\n",
+                          board);
+            return;
+        }
+        board_online[board] = false;
+
+        char text[48];
         snprintf(text, sizeof(text), "%d 号设备已离线", board);
         say_rule(R_OFFLINE, text, TTS_LEVEL_WARN);
     }
@@ -486,6 +536,21 @@ static void summary_tick()
 // ============================================================
 //  入口
 // ============================================================
+void linkage_init()
+{
+    // 静默期的起点。必须在 setup() 里 proto_init() 【之后】调用。
+    //
+    // 不能拿 millis() 直接和 ONLINE_MUTE_MS 比：proto_init() 里要先连
+    // WiFi、再连 MQTT、最后订阅主题，这一段在现场可能要十几秒。从芯片
+    // 上电算起的话，连接慢的时候静默期会在订阅建立之前就整段用完，
+    // 等于没设——而订阅一建立，服务器立刻就会把当前在线的板全推过来，
+    // 正是要屏蔽的那一批。
+    mute_start_ms = millis();
+
+    Serial.printf("[link] 静默期起算：%lu 秒内不播报设备上线\n",
+                  ONLINE_MUTE_MS / 1000);
+}
+
 void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
 {
 #if TTS_LOCAL_LINKAGE
