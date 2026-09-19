@@ -6,6 +6,12 @@
 // ============================================================
 //  本文件是唯一依赖具体 MQTT 库的地方。
 //  换库只改这里，其他文件不受影响。
+//
+//  ── 各板之间的差异全部由 my_config.h 的宏控制，本文件本身各板一致 ──
+//    ACK_AFTER_DONE    1 = 执行器做完动作才回执（1 号板舵机用）
+//    SUB_EXTRA_REPORT  1 = 额外订阅 report（联动旁听用）
+//    SUB_EXTRA_ONLINE  1 = 额外订阅 online（联动旁听用）
+//  宏没定义时按 0 处理，所以不定义它们的工程行为不受影响。
 // ============================================================
 
 static WiFiClient net;
@@ -35,7 +41,20 @@ static bool pending = false;
 static char pend_device[16];
 static char pend_action[24];
 static int pend_seq = 0;
-static StaticJsonDocument<256> pend_param;
+// 384 而不是 256：协议限制单条报文 400 字节以内，其中 param 可能占去
+// 大部分（例如 tts 的长播报文本），文档太小会让 param 静默丢失。
+static StaticJsonDocument<384> pend_param;
+
+#if ACK_AFTER_DONE
+// ---------------- 已受理、等执行器做完再回执的命令 ----------------
+// 舵机转 180° 要 1.8 秒，收到命令时不能马上回 ok，得等它停稳。
+// 这条命令从 pending 挪到这里存着，到位置了再发 ack。
+static bool wait_ack = false;
+static char wait_device[16];
+static char wait_action[24];
+static int wait_seq = 0;
+static StaticJsonDocument<384> wait_param;
+#endif
 
 // ---------------- 发送用的缓冲区 ----------------
 static StaticJsonDocument<384> tx_doc;  // ack / sys 共用
@@ -44,7 +63,29 @@ static StaticJsonDocument<384> dat_doc; // dat 专用
 static bool publish_to(const char *topic, const char *payload, bool retain, int qos);
 
 // ============================================================
-//  收到报文：解析信封 → 校验 → 存进待处理缓冲
+//  弱符号的默认实现
+//
+//  不实现这两个函数（或实现成这个默认样子）的板，行为与原来完全一致。
+//  1 号板在 servo.cpp 覆盖 device_busy，7 号板在 linkage.cpp 覆盖
+//  proto_on_other，其他板什么都不用做。
+// ============================================================
+__attribute__((weak)) bool device_busy()
+{
+    return false;
+}
+
+__attribute__((weak)) void proto_on_other(const char *type, const char *src,
+                                          JsonObjectConst body)
+{
+    (void)type;
+    (void)src;
+    (void)body;
+}
+
+// ============================================================
+//  收到报文：解析信封 → 校验 → 分流
+//    cmd → 存进待处理缓冲，主循环里执行
+//    其他（evt / dat / sys）→ 交给 proto_on_other（7 号板联动用）
 // ============================================================
 static void on_mqtt_message(String &topic, String &payload)
 {
@@ -60,8 +101,7 @@ static void on_mqtt_message(String &topic, String &payload)
 
     const char *ver = doc["ver"] | "";
     const char *type = doc["type"] | "";
-    int dst = doc["dst"] | -1;
-    int seq = doc["seq"] | 0;
+    const char *src = doc["src"] | "";
 
     // 协议 §3.2：先判断版本，不一致就忽略并在串口提示
     if (strcmp(ver, PROTO_VER) != 0)
@@ -70,15 +110,27 @@ static void on_mqtt_message(String &topic, String &payload)
         return;
     }
 
-    // 只处理下行命令
-    if (strcmp(type, "cmd") != 0)
-        return;
-
-    // dst 为目标板号，0 表示广播
-    if (dst != 0 && dst != ID)
+    // 【防自回环】本板自己发的报文一律丢掉。
+    // 7 号板为了联动订阅了 report 与 online，会收到自己发的 ack 与 online；
+    // 这一句是硬保证：只要 src 是本板板号就不处理，回环不可能形成
+    // （协议 §8.4 担心的正是这件事，见 readme 第四节 P4）。
+    if (atoi(src) == BOARD_ID)
         return;
 
     JsonObjectConst body = doc["body"].as<JsonObjectConst>();
+
+    // 非 cmd 报文：本层不处理，交给可选钩子
+    if (strcmp(type, "cmd") != 0)
+    {
+        proto_on_other(type, src, body);
+        return;
+    }
+
+    // dst 为目标板号，0 表示广播
+    int dst = doc["dst"] | -1;
+    if (dst != 0 && dst != BOARD_ID)
+        return;
+
     const char *device = body["device"] | "";
     const char *action = body["action"] | "";
 
@@ -93,7 +145,7 @@ static void on_mqtt_message(String &topic, String &payload)
     pend_device[sizeof(pend_device) - 1] = '\0';
     strncpy(pend_action, action, sizeof(pend_action) - 1);
     pend_action[sizeof(pend_action) - 1] = '\0';
-    pend_seq = seq;
+    pend_seq = doc["seq"] | 0;
 
     pend_param.clear();
     JsonObjectConst p = body["param"].as<JsonObjectConst>();
@@ -102,11 +154,12 @@ static void on_mqtt_message(String &topic, String &payload)
 
     pending = true;
 
-    Serial.printf("[proto] <- cmd seq=%d device=%s action=%s\n", seq, device, action);
+    Serial.printf("[proto] <- cmd seq=%d device=%s action=%s\n",
+                  pend_seq, pend_device, pend_action);
 }
 
 // ============================================================
-//  发布一个小工具：序列化 + 打印 + 发送
+//  发布的小工具：序列化 + 打印 + 发送
 // ============================================================
 static bool publish_doc(JsonDocument &doc, const char *topic, bool retain, int qos)
 {
@@ -132,15 +185,18 @@ static bool publish_to(const char *topic, const char *payload, bool retain, int 
 
 // ============================================================
 //  回执（type = ack，QoS 1）
+//
+//  seq 由调用方传入：正常回执用命令的 seq，挂起后再发的用存的 wait_seq，
+//  两者都是「所回应的那条命令的 seq」，平台据此配对。
 // ============================================================
 static void send_ack(const char *device, const char *action, const char *result,
-                     JsonObject ackParam)
+                     int seq, JsonObject ackParam)
 {
     tx_doc.clear();
     tx_doc["ver"] = PROTO_VER;
     tx_doc["type"] = "ack";
-    tx_doc["seq"] = pend_seq; // 复用命令的 seq，平台据此配对
-    tx_doc["src"] = String(ID);
+    tx_doc["seq"] = seq;
+    tx_doc["src"] = BOARD_ID_STR;
     tx_doc["dst"] = 0;
 
     JsonObject b = tx_doc.createNestedObject("body");
@@ -162,7 +218,7 @@ static void publish_online()
     tx_doc["ver"] = PROTO_VER;
     tx_doc["type"] = "sys";
     tx_doc["seq"] = next_seq();
-    tx_doc["src"] = String(ID);
+    tx_doc["src"] = BOARD_ID_STR;
     tx_doc["dst"] = 0;
 
     JsonObject b = tx_doc.createNestedObject("body");
@@ -178,11 +234,26 @@ static void publish_online()
 // ============================================================
 static void flush_pending()
 {
+#if ACK_AFTER_DONE
+    // 有一条命令已经受理、执行器还在动作：等它做完再把 ack 发出去。
+    // 这一轮不再受理新命令（return），免得两条命令的回执交错。
+    if (wait_ack)
+    {
+        if (device_busy())
+            return; // 还没到位，下一轮再来看
+
+        send_ack(wait_device, wait_action, "ok", wait_seq,
+                 wait_param.as<JsonObject>());
+        wait_ack = false;
+        return;
+    }
+#endif
+
     if (!pending)
         return;
     pending = false;
 
-    StaticJsonDocument<256> ackParamDoc;
+    StaticJsonDocument<384> ackParamDoc;
     JsonObject ackParam = ackParamDoc.to<JsonObject>();
 
     ProtoResult r = handle_device_cmd(pend_device, pend_action,
@@ -197,7 +268,31 @@ static void flush_pending()
         return;
     }
 
-    send_ack(pend_device, pend_action, (r == PROTO_OK) ? "ok" : "fail", ackParam);
+    if (r == PROTO_FAIL)
+    {
+        // 参数非法：立即回 fail，不涉及执行器动作，没有挂起的必要
+        send_ack(pend_device, pend_action, "fail", pend_seq, ackParam);
+        return;
+    }
+
+#if ACK_AFTER_DONE
+    // 命令已受理，但执行器还在动作：把回执挂起，到位置了再发
+    if (device_busy())
+    {
+        strncpy(wait_device, pend_device, sizeof(wait_device) - 1);
+        wait_device[sizeof(wait_device) - 1] = '\0';
+        strncpy(wait_action, pend_action, sizeof(wait_action) - 1);
+        wait_action[sizeof(wait_action) - 1] = '\0';
+        wait_seq = pend_seq;
+        wait_param.clear();
+        wait_param.to<JsonObject>().set(ackParam);
+        wait_ack = true;
+        Serial.printf("[proto] 执行器动作中，seq=%d 的 ack 挂起，到位后再发\n", wait_seq);
+        return;
+    }
+#endif
+
+    send_ack(pend_device, pend_action, "ok", pend_seq, ackParam);
 }
 
 // ============================================================
@@ -214,7 +309,7 @@ static void proto_connect()
     snprintf(will, sizeof(will),
              "{\"ver\":\"%s\",\"type\":\"sys\",\"seq\":2,\"src\":\"%d\",\"dst\":0,"
              "\"body\":{\"device\":\"sys\",\"event\":\"offline\"}}",
-             PROTO_VER, ID);
+             PROTO_VER, BOARD_ID);
     client.setWill(TOPIC_ONLINE, will, true, 1); // Retain + QoS 1
 
     while (!client.connected())
@@ -234,6 +329,19 @@ static void proto_connect()
     client.subscribe(TOPIC_CMD, 1);
     Serial.printf("[proto] 已订阅 %s\n", TOPIC_CMD);
 
+#if SUB_EXTRA_REPORT
+    // 7 号板专用：联动播报需要旁听其他板的上报。
+    // 协议 §8.4 一般要求各板不订阅 report，本板的理由与防护见 readme 第四节 P4，
+    // 自回环已由 on_mqtt_message 开头的 src 过滤彻底堵死。
+    client.subscribe(TOPIC_REPORT, 1);
+    Serial.printf("[proto] 已订阅 %s（联动旁听）\n", TOPIC_REPORT);
+#endif
+
+#if SUB_EXTRA_ONLINE
+    client.subscribe(TOPIC_ONLINE, 1);
+    Serial.printf("[proto] 已订阅 %s（联动旁听）\n", TOPIC_ONLINE);
+#endif
+
     publish_online();
 }
 
@@ -252,7 +360,7 @@ void proto_init()
     Serial.println();
     Serial.printf("[proto] WiFi 已连接，IP = %s\n", WiFi.localIP().toString().c_str());
 
-    client.begin(mqttServer, mqttPort, net);
+    client.begin(MQTT_SERVER, MQTT_PORT, net);
     client.onMessage(on_mqtt_message);
 
     proto_connect();
@@ -283,7 +391,7 @@ JsonArray proto_dat_samples()
     dat_doc["ver"] = PROTO_VER;
     dat_doc["type"] = "dat";
     dat_doc["seq"] = 0; // 发送时填真实序号
-    dat_doc["src"] = String(ID);
+    dat_doc["src"] = BOARD_ID_STR;
     dat_doc["dst"] = 0;
 
     JsonObject b = dat_doc.createNestedObject("body");

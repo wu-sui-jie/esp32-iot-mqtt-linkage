@@ -17,10 +17,10 @@
 // 课堂例程没踩到，是因为它们把 #include <WiFi.h> 写在了
 // #include "my_config.h" 前面；而本工程的 mqtt_proto.h 是先包含
 // my_config.h 的，所以必须改名，不能靠包含顺序。
-#define WIFI_SSID "wusuijie"       // WiFi账号
-#define WIFI_PASSWORD "11111111"   // WiFi密码
-#define mqttServer "yunyismart.tech" // MQTT服务器地址
-#define mqttPort 1883                // MQTT服务器端口号
+#define WIFI_SSID     "wusuijie"        // WiFi账号
+#define WIFI_PASSWORD "11111111"        // WiFi密码
+#define MQTT_SERVER   "yunyismart.tech" // MQTT服务器地址
+#define MQTT_PORT     1883              // MQTT服务器端口号
 
 // ================ 本组编号与主题定义 ================
 // 前缀 = 课程空间前缀 202609_PP2 + 组号 1
@@ -30,7 +30,8 @@
 #define TOPIC_ONLINE "202609_PP2/1/online" // 上行：上线下线，Retain
 
 // ================ 本设备板号（1~8，按协议表 7） ================
-#define ID 5
+#define BOARD_ID 5
+#define BOARD_ID_STR "5"
 
 // ================ 外设开关 ================
 // 用不到的把 1 改成 0，省 ROM
@@ -48,6 +49,14 @@
 #define RGB_PIN 27
 #define RGB_COUNT 4
 #endif
+
+// ================ 协议层开关（定义见 mqtt_proto.h） ================
+// 本板是执行器，RGB 设色是瞬时的，收到命令立即回执；
+// 旁听 report / online 是为后续的「光照照明、火焰声光报警」联动预留，
+// 本次先置 0，等联动实现时再打开。
+#define ACK_AFTER_DONE 0    // 无长动作，立即回执
+#define SUB_EXTRA_REPORT 0  // 联动开关，阶段 4 打开
+#define SUB_EXTRA_ONLINE 0  // 不需要
 
 // ================ MQTT 接收缓冲区 ================
 // arduino-mqtt 默认只有 128 字节，协议里带 param 的报文可能超过，

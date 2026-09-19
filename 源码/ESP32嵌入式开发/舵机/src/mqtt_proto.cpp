@@ -7,12 +7,11 @@
 //  本文件是唯一依赖具体 MQTT 库的地方。
 //  换库只改这里，其他文件不受影响。
 //
-//  与 4、5 号板那份的差别只有三处，且都由 my_config.h 的宏控制：
-//    ACK_AFTER_DONE    ack 挂起到执行器做完
-//    SUB_EXTRA_REPORT  额外订阅 report
-//    SUB_EXTRA_ONLINE  额外订阅 online
-//  宏没定义时按 0 处理，所以在没定义它们的工程里，本文件的行为
-//  与改动前完全一致。
+//  ── 各板之间的差异全部由 my_config.h 的宏控制，本文件本身各板一致 ──
+//    ACK_AFTER_DONE    1 = 执行器做完动作才回执（1 号板舵机用）
+//    SUB_EXTRA_REPORT  1 = 额外订阅 report（联动旁听用）
+//    SUB_EXTRA_ONLINE  1 = 额外订阅 online（联动旁听用）
+//  宏没定义时按 0 处理，所以不定义它们的工程行为不受影响。
 // ============================================================
 
 static WiFiClient net;
@@ -115,7 +114,7 @@ static void on_mqtt_message(String &topic, String &payload)
     // 7 号板为了联动订阅了 report 与 online，会收到自己发的 ack 与 online；
     // 这一句是硬保证：只要 src 是本板板号就不处理，回环不可能形成
     // （协议 §8.4 担心的正是这件事，见 readme 第四节 P4）。
-    if (atoi(src) == ID)
+    if (atoi(src) == BOARD_ID)
         return;
 
     JsonObjectConst body = doc["body"].as<JsonObjectConst>();
@@ -129,7 +128,7 @@ static void on_mqtt_message(String &topic, String &payload)
 
     // dst 为目标板号，0 表示广播
     int dst = doc["dst"] | -1;
-    if (dst != 0 && dst != ID)
+    if (dst != 0 && dst != BOARD_ID)
         return;
 
     const char *device = body["device"] | "";
@@ -197,7 +196,7 @@ static void send_ack(const char *device, const char *action, const char *result,
     tx_doc["ver"] = PROTO_VER;
     tx_doc["type"] = "ack";
     tx_doc["seq"] = seq;
-    tx_doc["src"] = String(ID);
+    tx_doc["src"] = BOARD_ID_STR;
     tx_doc["dst"] = 0;
 
     JsonObject b = tx_doc.createNestedObject("body");
@@ -219,7 +218,7 @@ static void publish_online()
     tx_doc["ver"] = PROTO_VER;
     tx_doc["type"] = "sys";
     tx_doc["seq"] = next_seq();
-    tx_doc["src"] = String(ID);
+    tx_doc["src"] = BOARD_ID_STR;
     tx_doc["dst"] = 0;
 
     JsonObject b = tx_doc.createNestedObject("body");
@@ -310,7 +309,7 @@ static void proto_connect()
     snprintf(will, sizeof(will),
              "{\"ver\":\"%s\",\"type\":\"sys\",\"seq\":2,\"src\":\"%d\",\"dst\":0,"
              "\"body\":{\"device\":\"sys\",\"event\":\"offline\"}}",
-             PROTO_VER, ID);
+             PROTO_VER, BOARD_ID);
     client.setWill(TOPIC_ONLINE, will, true, 1); // Retain + QoS 1
 
     while (!client.connected())
@@ -361,7 +360,7 @@ void proto_init()
     Serial.println();
     Serial.printf("[proto] WiFi 已连接，IP = %s\n", WiFi.localIP().toString().c_str());
 
-    client.begin(mqttServer, mqttPort, net);
+    client.begin(MQTT_SERVER, MQTT_PORT, net);
     client.onMessage(on_mqtt_message);
 
     proto_connect();
@@ -392,7 +391,7 @@ JsonArray proto_dat_samples()
     dat_doc["ver"] = PROTO_VER;
     dat_doc["type"] = "dat";
     dat_doc["seq"] = 0; // 发送时填真实序号
-    dat_doc["src"] = String(ID);
+    dat_doc["src"] = BOARD_ID_STR;
     dat_doc["dst"] = 0;
 
     JsonObject b = dat_doc.createNestedObject("body");

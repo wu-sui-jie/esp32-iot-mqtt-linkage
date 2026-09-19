@@ -18,10 +18,10 @@
 // 课堂例程没踩到，是因为它们把 #include <WiFi.h> 写在了
 // #include "my_config.h" 前面；而本工程的 mqtt_proto.h 是先包含
 // my_config.h 的，所以必须改名，不能靠包含顺序。Mate 50 pro ktxyj4869
-#define WIFI_SSID "wusuijie"             // WiFi账号
-#define WIFI_PASSWORD "11111111"    // WiFi密码
-#define mqttServer "yunyismart.tech" // MQTT服务器地址
-#define mqttPort 1883                // MQTT服务器端口号
+#define WIFI_SSID     "wusuijie"        // WiFi账号
+#define WIFI_PASSWORD "11111111"        // WiFi密码
+#define MQTT_SERVER   "yunyismart.tech" // MQTT服务器地址
+#define MQTT_PORT     1883              // MQTT服务器端口号
 
 // ================ 本组编号与主题定义 ================
 // 前缀 = 课程空间前缀 202609_PP2 + 组号 1
@@ -31,7 +31,8 @@
 #define TOPIC_ONLINE "202609_PP2/1/online" // 上行：上线下线，Retain
 
 // ================ 本设备板号（1~8，按协议表 7） ================
-#define ID 4
+#define BOARD_ID 4
+#define BOARD_ID_STR "4"
 
 // ================ 外设开关 ================
 // 用不到的把 1 改成 0，省 ROM
@@ -45,6 +46,13 @@
 #define SHT30_ADDR 0x44 // I2C 从机地址
 #define SHT30_SDA 21    // I2C 数据线
 #define SHT30_SCL 22    // I2C 时钟线
+
+// ================ 协议层开关（定义见 mqtt_proto.h） ================
+// 本板是纯传感器板，没有执行器，也没有需要旁听的报文，
+// 三个开关全部为 0。宏名与其余各板保持一致，便于对照。
+#define ACK_AFTER_DONE 0    // 无执行器，收到命令立即回执
+#define SUB_EXTRA_REPORT 0  // 不旁听 report
+#define SUB_EXTRA_ONLINE 0  // 不旁听 online
 
 // ================ MQTT 接收缓冲区 ================
 // arduino-mqtt 默认只有 128 字节，协议里带 param 的报文可能超过，
