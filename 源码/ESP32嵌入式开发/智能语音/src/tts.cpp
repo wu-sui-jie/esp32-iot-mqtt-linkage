@@ -31,6 +31,10 @@ static int q_count = 0; // 队列里现有几条
 static uint32_t busy_until_ms = 0; // 估算的"这一句念完"时刻
 static uint8_t play_level = 255;   // 正在播的那条的等级（255 = 没在播）
 
+// 正在播的那条的原文，入队查重用（见 enqueue）：
+// 正在念的话再次送进来时，不应该排到队尾再念一遍。
+static char playing_text[TTS_TEXT_MAX] = "";
+
 static void play_now(const char *text, uint8_t level);
 
 // ============================================================
@@ -88,6 +92,8 @@ static void play_now(const char *text, uint8_t level)
     uint32_t ms = TTS_BASE_MS + (uint32_t)len * TTS_MS_PER_BYTE;
     busy_until_ms = millis() + ms;
     play_level = level;
+    strncpy(playing_text, text, TTS_TEXT_MAX - 1);
+    playing_text[TTS_TEXT_MAX - 1] = '\0';
 
     Serial.printf("[tts] 播报（等级 %u，%u 字节，约 %u ms）：%s\n",
                   level, len, (unsigned)ms, text);
@@ -95,9 +101,28 @@ static void play_now(const char *text, uint8_t level)
 
 // ============================================================
 //  排队：队列满了就把等级最低的那条换成新的
+//
+//  入队前先查重：队列里（以及正在播的那条）已经有完全相同的一句话，
+//  就不再排第二遍。传感器抖动、QoS 1 的重复投递、多条规则碰巧
+//  凑出同一句话，都会送来说一样的内容，不挡掉喇叭就会念好几遍。
+//  重复不算失败，返回 true 表示"已受理"。
 // ============================================================
 static bool enqueue(const char *text, uint8_t level)
 {
+    for (int i = 0; i < q_count; i++)
+    {
+        if (strcmp(queue[i].text, text) == 0)
+        {
+            Serial.printf("[tts] 队列里已有同样的内容，不重复入队：%s\n", text);
+            return true;
+        }
+    }
+    if (play_level != 255 && strcmp(playing_text, text) == 0)
+    {
+        Serial.printf("[tts] 正在播报同样的内容，不重复入队：%s\n", text);
+        return true;
+    }
+
     if (q_count < TTS_QUEUE_LEN)
     {
         strncpy(queue[q_count].text, text, TTS_TEXT_MAX - 1);
@@ -157,6 +182,11 @@ bool tts_say(const char *text, uint8_t level)
 bool tts_busy()
 {
     return (int32_t)(millis() - busy_until_ms) < 0;
+}
+
+int tts_queue_count()
+{
+    return q_count;
 }
 
 void tts_loop()

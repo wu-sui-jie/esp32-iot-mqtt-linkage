@@ -34,3 +34,8 @@ bool tts_say(const char *text, uint8_t level);
 
 // 是否正在播报（按估算时长判断，语音模块不回传播放状态）
 bool tts_busy();
+
+// 队列里还排着几条没播的。
+// 【用途】周期汇总播报靠它判断"现在是不是空闲"：汇总是最低优先级，
+// 队列里还有告警在排就不凑热闹，等清空了再念。
+int tts_queue_count();
