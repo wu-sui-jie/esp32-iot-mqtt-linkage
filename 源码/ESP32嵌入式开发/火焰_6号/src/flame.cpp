@@ -30,6 +30,14 @@ static bool was_connected = false;        // 上一轮的 MQTT 连接状态
 
 static unsigned long raw_since_ms = 0;      // 原始判定最近一次变化的时刻
 static unsigned long last_evt_ms = 0;       // 最近一次上报事件（限流）
+
+// 被限流挡下的状态跳变，记在这里等窗口过去再补发。
+// 【绝不能直接丢掉】状态跳变一块板只发生一次，丢了就没有第二次机会。
+// 现场最典型的翻车方式：点火后很快移开打火机，clear 正好落在 500ms 的
+// 限流窗口里被丢弃，而 flame_state 这时已经改成"无火"，于是再也不会重发，
+// 下游（5 号板的声光报警）就一直停在火焰报警上停不下来。
+static bool pending_evt = false;
+static bool pending_state = false;
 static unsigned long last_detected_ms = 0;  // 最近一次上报 detected（重发计时）
 static unsigned long last_dat_ms = 0;       // 最近一次上报强度
 
@@ -76,6 +84,45 @@ static void calibrate()
 }
 
 // ============================================================
+//  上报一次状态跳变（detected / clear）
+// ============================================================
+static void send_state_evt(bool has_flame, int ao, int diff)
+{
+    if (has_flame)
+    {
+        Serial.printf("[flame] >>> 检测到火焰 <<<（IO=%d 偏离=%d 阈值=%d）\n",
+                      ao, diff, FLAME_THRESHOLD);
+        proto_send_evt(DEV_FLAME, "detected", 3); // 等级 3 紧急
+        last_detected_ms = millis();
+    }
+    else
+    {
+        Serial.printf("[flame] >>> 火焰消失 <<<（IO=%d 偏离=%d）\n", ao, diff);
+        proto_send_evt(DEV_FLAME, "clear", 0); // 等级 0 恢复
+    }
+}
+
+// 补发被限流挡下的那次状态跳变。窗口一到就发，所以最多迟 500ms，
+// 但绝不会像以前那样凭空消失。
+static void flush_pending_evt()
+{
+    if (!pending_evt)
+        return;
+
+    unsigned long now = millis();
+    if (now - last_evt_ms < FLAME_LIMIT_MS)
+        return; // 限流窗口还没过去
+
+    pending_evt = false;
+    last_evt_ms = now;
+
+    int diff = 0;
+    int ao = read_ao(&diff);
+    Serial.println("[flame] 补发刚才被限流挡下的状态事件");
+    send_state_evt(pending_state, ao, diff);
+}
+
+// ============================================================
 //  检测与上报
 // ============================================================
 static void scan()
@@ -104,19 +151,14 @@ static void scan()
         if (now - last_evt_ms >= FLAME_LIMIT_MS)
         {
             last_evt_ms = now;
-
-            if (flame_state)
-            {
-                Serial.printf("[flame] >>> 检测到火焰 <<<（IO=%d 偏离=%d 阈值=%d）\n",
-                              ao, diff, FLAME_THRESHOLD);
-                proto_send_evt(DEV_FLAME, "detected", 3); // 等级 3 紧急
-                last_detected_ms = now;
-            }
-            else
-            {
-                Serial.printf("[flame] >>> 火焰消失 <<<（IO=%d 偏离=%d）\n", ao, diff);
-                proto_send_evt(DEV_FLAME, "clear", 0); // 等级 0 恢复
-            }
+            send_state_evt(flame_state, ao, diff);
+        }
+        else
+        {
+            // 落在限流窗口里：不丢，记下来等窗口过去补发。
+            // 期间状态若再变，会覆盖这里的记录，所以补发的永远是最新状态。
+            pending_evt = true;
+            pending_state = flame_state;
         }
     }
     else if (flame_state)
@@ -192,6 +234,7 @@ void flame_loop()
     was_connected = connected;
 
     scan();
+    flush_pending_evt(); // 补发被限流挡下的状态事件
 
     // ---- 强度周期上报（协议表 19：每 1 秒）----
     if (now - last_dat_ms >= FLAME_DAT_PERIOD_MS)

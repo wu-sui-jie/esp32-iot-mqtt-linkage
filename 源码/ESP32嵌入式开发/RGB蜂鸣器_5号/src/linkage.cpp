@@ -46,6 +46,9 @@ static bool manual_override = false; // 平台手动接管中
 
 static bool need_update = false; // 有输入变化，待重算场景
 
+// 最近一次收到火焰报文的时刻，超时保护靠它（见 linkage_loop）
+static uint32_t last_flame_evt_ms = 0;
+
 // 场景定义，数字越大优先级越高
 enum Scene
 {
@@ -147,6 +150,9 @@ static void on_evt(JsonObjectConst body)
     if (strcmp(device, LINK_DEV_FLAME) != 0)
         return;
 
+    // 任何一条火焰报文都刷新这个时刻，超时保护靠它判断"还有没有火"
+    last_flame_evt_ms = millis();
+
     if (strcmp(ev, "detected") == 0)
     {
         // 6 号板在火焰持续期间每 5 秒重发一次 detected，
@@ -235,6 +241,20 @@ void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
 
 void linkage_loop()
 {
+    // ---- 火焰告警的超时兜底 ----
+    // 6 号板在火焰持续期间每 5 秒重发一次 detected，只要还烧着，
+    // 报文就不会断。这里超过 FLAME_EVT_TIMEOUT_MS 一条都没收到，
+    // 就认定火已经灭了（或者 6 号板掉线了），自动解除声光报警——
+    // 万一 clear 报文在路上丢了，不至于让灯和蜂鸣器一直响下去。
+    if (flame_alarm && millis() - last_flame_evt_ms > FLAME_EVT_TIMEOUT_MS)
+    {
+        flame_alarm = false;
+        manual_override = false;
+        need_update = true;
+        Serial.printf("[link] 已经 %lu 秒没收到火焰报文，自动解除报警\n",
+                      FLAME_EVT_TIMEOUT_MS / 1000);
+    }
+
     if (!need_update)
         return;
     recompute();
