@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RGB灯控制页面</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .rgb-display {
+            width: 200px;
+            height: 200px;
+            border: 8px solid #f0f0f0;
+            border-radius: 50%;
+            margin: 0 auto 30px;
+            position: relative;
+            background: #000;
+            transition: all 0.5s ease;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .rgb-display.green {
+            background: radial-gradient(circle, #00ff00, #00cc00);
+            box-shadow: 0 0 30px rgba(0, 255, 0, 0.5);
+        }
+
+        .rgb-display.red {
+            background: radial-gradient(circle, #ff0000, #cc0000);
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.5);
+        }
+
+        .rgb-display.blue {
+            background: radial-gradient(circle, #0000ff, #0000cc);
+            box-shadow: 0 0 30px rgba(0, 0, 255, 0.5);
+        }
+
+        .rgb-display.rainbow {
+            background: conic-gradient(
+                #ff0000 0deg,
+                #ff8000 60deg,
+                #ffff00 120deg,
+                #00ff00 180deg,
+                #00ffff 240deg,
+                #8000ff 300deg,
+                #ff0000 360deg
+            );
+            animation: rainbow 3s linear infinite;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.3);
+        }
+
+        .rgb-display.gradient {
+            background: linear-gradient(45deg, #ff0000, #00ff00, #0000ff, #ffff00, #ff00ff, #00ffff);
+            background-size: 400% 400%;
+            animation: gradient 2s ease infinite;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.3);
+        }
+
+        .rgb-display.off {
+            background: #000;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+
+        @keyframes rainbow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .control-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            padding: 15px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-green {
+            background: linear-gradient(45deg, #00b894, #00cec9);
+        }
+
+        .btn-red {
+            background: linear-gradient(45deg, #e17055, #d63031);
+        }
+
+        .btn-blue {
+            background: linear-gradient(45deg, #74b9ff, #0984e3);
+        }
+
+        .btn-rainbow {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57, #ff9ff3);
+            background-size: 400% 400%;
+            animation: gradient 2s ease infinite;
+        }
+
+        .btn-gradient {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+        }
+
+        .btn-off {
+            background: linear-gradient(45deg, #636e72, #2d3436);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-weight: 500;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .current-effect {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        .effect-name {
+            color: #333;
+        }
+
+        .effect-off {
+            color: #666;
+        }
+
+        .effect-green {
+            color: #00b894;
+        }
+
+        .effect-red {
+            color: #d63031;
+        }
+
+        .effect-blue {
+            color: #0984e3;
+        }
+
+        .effect-rainbow {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57, #ff9ff3);
+            background-size: 400% 400%;
+            animation: gradient 2s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .effect-gradient {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RGB灯控制面板</h1>
+        
+        <div class="rgb-display off" id="rgbDisplay"></div>
+
+        <div class="current-effect">
+            <span class="effect-name effect-off" id="currentEffect">当前效果：关闭</span>
+        </div>
+
+        <div class="control-buttons">
+            <button class="btn btn-green" onclick="controlRGB(1)">绿色</button>
+            <button class="btn btn-red" onclick="controlRGB(2)">红色</button>
+            <button class="btn btn-blue" onclick="controlRGB(3)">蓝色</button>
+            <button class="btn btn-rainbow" onclick="controlRGB(4)">跑马灯</button>
+            <button class="btn btn-gradient" onclick="controlRGB(5)">渐变色</button>
+            <button class="btn btn-off" onclick="controlRGB(6)">关闭</button>
+        </div>
+
+        <div class="status disconnected" id="status">
+            未连接到 MQTT 服务器
+        </div>
+        
+        <br />
+        <h4>设计者: 苏州城市学院 石正璞</h4>
+    </div>
+
+    <script>
+        let mqttClient = null;
+        let currentEffect = 6; // 默认关闭状态
+
+        const TOPIC = "202503_PP2/01";
+        
+        function connectMQTT() {
+            const host = "yunyismart.tech";
+            const port = 9001;
+
+            if (mqttClient) {
+                mqttClient.end();
+            }
+
+            const connectUrl = `ws://${host}:${port}`;
+            
+            mqttClient = mqtt.connect(connectUrl, {
+                clientId: 'rgb_control_' + Math.random().toString(16).substr(2, 8),
+                clean: true,
+                reconnectPeriod: 1000,
+                connectTimeout: 30 * 1000,
+            });
+
+            mqttClient.on('connect', function () {
+                console.log('MQTT 连接成功');
+                updateStatus('已连接到 MQTT 服务器', 'connected');
+            });
+
+            mqttClient.on('error', function (err) {
+                console.error('MQTT 连接错误:', err);
+                updateStatus('MQTT 连接失败: ' + err.message, 'disconnected');
+            });
+
+            mqttClient.on('offline', function () {
+                console.log('MQTT 离线');
+                updateStatus('MQTT 连接断开', 'disconnected');
+            });
+
+            mqttClient.on('reconnect', function () {
+                console.log('MQTT 重连中...');
+                updateStatus('MQTT 重连中...', 'disconnected');
+            });
+        }
+
+        function updateStatus(message, type) {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
+        }
+
+        function controlRGB(cmd) {
+            if (!mqttClient || !mqttClient.connected) {
+                alert('请先连接 MQTT 服务器');
+                return;
+            }
+
+            const message = {
+                id: 0,
+                device: "rgb",
+                key: "control",
+                value: cmd.toString()
+            };
+
+            mqttClient.publish(TOPIC, JSON.stringify(message), function (err) {
+                if (err) {
+                    console.error('发送消息失败:', err);
+                    alert('发送消息失败: ' + err.message);
+                } else {
+                    console.log('发送消息成功:', message);
+                    updateRGBDisplay(cmd);
+                }
+            });
+        }
+
+        function updateRGBDisplay(cmd) {
+            const rgbDisplay = document.getElementById('rgbDisplay');
+            const currentEffectElement = document.getElementById('currentEffect');
+            
+            // 移除所有效果类
+            rgbDisplay.className = 'rgb-display';
+            currentEffectElement.className = 'effect-name';
+
+            switch(cmd) {
+                case 1: // 绿色
+                    rgbDisplay.classList.add('green');
+                    currentEffectElement.classList.add('effect-green');
+                    currentEffectElement.textContent = '当前效果：绿色';
+                    updateStatus('RGB灯已设置为绿色', 'connected');
+                    break;
+                case 2: // 红色
+                    rgbDisplay.classList.add('red');
+                    currentEffectElement.classList.add('effect-red');
+                    currentEffectElement.textContent = '当前效果：红色';
+                    updateStatus('RGB灯已设置为红色', 'connected');
+                    break;
+                case 3: // 蓝色
+                    rgbDisplay.classList.add('blue');
+                    currentEffectElement.classList.add('effect-blue');
+                    currentEffectElement.textContent = '当前效果：蓝色';
+                    updateStatus('RGB灯已设置为蓝色', 'connected');
+                    break;
+                case 4: // 跑马灯
+                    rgbDisplay.classList.add('rainbow');
+                    currentEffectElement.classList.add('effect-rainbow');
+                    currentEffectElement.textContent = '当前效果：跑马灯';
+                    updateStatus('RGB灯已设置为跑马灯效果', 'connected');
+                    break;
+                case 5: // 渐变色
+                    rgbDisplay.classList.add('gradient');
+                    currentEffectElement.classList.add('effect-gradient');
+                    currentEffectElement.textContent = '当前效果：渐变色';
+                    updateStatus('RGB灯已设置为渐变色效果', 'connected');
+                    break;
+                case 6: // 关闭
+                    rgbDisplay.classList.add('off');
+                    currentEffectElement.classList.add('effect-off');
+                    currentEffectElement.textContent = '当前效果：关闭';
+                    updateStatus('RGB灯已关闭', 'connected');
+                    break;
+            }
+            
+            currentEffect = cmd;
+        }
+
+        // 页面加载完成后的初始化
+        window.onload = function() {
+            // 可以在这里添加自动连接逻辑
+            connectMQTT();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+/* 基础样式  */
+body {
+    text-align: center;
+    padding: 50px;
+    font-family: Arial;
+}
+
+/* LED容器 */
+.led-box {
+    display: inline-block;
+    margin: 10px;
+    padding: 10px;
+    border: 2px solid #ccc;
+}
+
+/* LED默认状态 - 就是一个圆 */
+.led {
+    width: 80px;              /* 宽度 */
+    height: 80px;             /* 高度 */
+    border-radius: 50%;       /* 圆角50% = 正圆 */
+    background-color: #333; /* 深灰色背景 */
+    margin: 10px auto;        /* 上下间距10px，左右居中 */
+    border: 3px solid #555; /* 边框 */
+}
+
+/* 开灯状态：红色+发光（当class包含"on"时生效） */
+.led.on {
+    background-color: red;
+    box-shadow: 0 0 20px red; /* 发光效果 */
+}
+
+/* 按钮样式 */
+button {
+    padding: 10px 20px;
+    margin: 5px;
+    cursor: pointer;
+}
+/* 按钮颜色区分 */
+.btn-on { background: green; color: white; }
+.btn-off { background: gray; color: white; }

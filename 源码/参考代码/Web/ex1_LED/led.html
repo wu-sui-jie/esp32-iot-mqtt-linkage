@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>LED控制页面</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        /* 基础样式  */
+        body {
+            text-align: center;
+            padding: 50px;
+            font-family: Arial;
+        }
+
+        /* LED容器 */
+        .led-box {
+            display: inline-block;
+            margin: 10px;
+            padding: 10px;
+            border: 2px solid #ccc;
+        }
+
+        /* LED默认状态 - 就是一个圆 */
+        .led {
+            width: 80px;              /* 宽度 */
+            height: 80px;             /* 高度 */
+            border-radius: 50%;       /* 圆角50% = 正圆 */
+            background-color: #333; /* 深灰色背景 */
+            margin: 10px auto;        /* 上下间距10px，左右居中 */
+            border: 3px solid #555; /* 边框 */
+        }
+
+        /* 开灯状态：红色+发光（当class包含"on"时生效） */
+        .led.on {
+            background-color: red;
+            box-shadow: 0 0 20px red; /* 发光效果 */
+        }
+
+        /* 按钮样式 */
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        /* 按钮颜色区分 */
+        .btn-on { background: green; color: white; }
+        .btn-off { background: gray; color: white; }
+    </style>
+</head>
+
+<body>
+
+    <h1>LED控制面板</h1>
+
+    <div class="led-box">
+        <h3>任意设备的LED1</h3>
+        <div class="led" id="led1"></div>
+        <button class="btn-on" onclick="control_LED1(0, 1)">开</button>
+        <button class="btn-off" onclick="control_LED1(0, 0)">关</button>
+    </div>
+
+    <!-- 状态 -->
+    <div style="margin-top: 30px">
+        <p>消息: <input type="text" id="msg" size="40" readonly></p>
+        <p id="status" style="color: red;">未连接</p>
+    </div>
+    
+    <br />
+    <h4>设计者: 苏州城市学院 石正璞</h4>
+
+    <script>
+        let mqttClient = null;
+        const HOST = "yunyismart.tech";
+        const PORT = 9001;
+        const TOPIC = "202609_PP2/15";
+
+        // 连接MQTT
+        function connectMQTT() {
+            // 连接MQTT服务器
+            const connectUrl = `ws://${HOST}:${PORT}`;
+            mqttClient = mqtt.connect(connectUrl, {
+                clientId: 'web_' + Math.random().toString(16).substr(2, 8),
+                clean: true,
+                reconnectPeriod: 1000
+            });
+
+            // 连接成功后
+            mqttClient.on('connect', function () {
+                document.getElementById('status').innerHTML = '已连接';
+                document.getElementById('status').style.color = 'green';
+                // 订阅主题
+                mqttClient.subscribe(TOPIC);
+            });
+
+            // 收到消息处理
+            mqttClient.on('message', function (topic, payload) {
+                const msg = payload.toString();
+                // 改变HTML页面中元素的值，此处是文本框的内容
+                document.getElementById('msg').value = msg;
+
+                // 解析JSON控制LED
+                try {
+                    const data = JSON.parse(msg);
+                    if (data.device == "led1" && data.key == "control") {
+                        update_LED1(data.id, data.value == "on" ? 1 : 0);
+                    }
+                } catch (e) { }
+            });
+        }
+
+        // 控制LED函数 (id:0是全部，其余是某个设备id，cmd: 1开 0关)
+        function control_LED1(id, cmd) {
+            if (!mqttClient || !mqttClient.connected) {
+                alert('未连接服务器');
+                return;
+            }
+
+            // 构造消息
+            const message = {
+                id: id,                    // 设备ID
+                device: "led1",            // 设备类型
+                key: "control",            // 操作类型
+                value: cmd == 1 ? "on" : "off"  // 值：开或关
+            };
+
+            // 发布MQTT消息
+            mqttClient.publish(TOPIC, JSON.stringify(message));
+        }
+
+        // 更新LED的界面显示
+        function update_LED1(id, cmd) {
+            const ledElement = document.getElementById('led1');
+
+            if (cmd == 1) {
+                ledElement.classList.add('on');  // 开灯：添加on类
+            } else {
+                ledElement.classList.remove('on'); // 关灯：移除on类
+            }
+        }
+
+        // 页面加载完成后的初始化
+        window.onload = function () {
+            // 自动连接
+            connectMQTT();
+        };
+    </script>
+
+</body>
+</html>

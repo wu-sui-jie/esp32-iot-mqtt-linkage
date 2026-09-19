@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>LED控制页面</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+
+<body>
+
+    <h1>LED控制面板</h1>
+
+    <div class="led-box">
+        <h3>任意设备的LED1</h3>
+        <div class="led" id="led1"></div>
+        <button class="btn-on" onclick="control_LED1(0, 1)">开</button>
+        <button class="btn-off" onclick="control_LED1(0, 0)">关</button>
+    </div>
+
+    <!-- 状态 -->
+    <div style="margin-top: 30px">
+        <p>消息: <input type="text" id="msg" size="40" readonly></p>
+        <p id="status" style="color: red;">未连接</p>
+    </div>
+    
+    <br />
+    <h4>设计者: 苏州城市学院 石正璞</h4>
+
+    <script>
+    </script>
+
+</body>
+</html>

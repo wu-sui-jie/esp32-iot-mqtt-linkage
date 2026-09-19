@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>舵机控制页面</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .servo-display {
+            width: 200px;
+            height: 200px;
+            border: 8px solid #f0f0f0;
+            border-radius: 50%;
+            margin: 0 auto 30px;
+            position: relative;
+            background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+            transition: transform 0.5s ease;
+        }
+
+        .servo-arm {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 80px;
+            height: 4px;
+            background: #ff6b6b;
+            transform-origin: left center;
+            transform: translateY(-50%);
+            border-radius: 2px;
+            transition: transform 0.5s ease;
+        }
+
+        .servo-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            background: #333;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .control-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            padding: 15px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+            color: white;
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-weight: 500;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .mqtt-config {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .mqtt-config input {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .connect-btn {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            margin-top: 10px;
+        }
+
+        .connect-btn:hover {
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>舵机控制面板</h1>
+
+        <div class="servo-display" id="servoDisplay">
+            <div class="servo-center"></div>
+            <div class="servo-arm" id="servoArm"></div>
+        </div>
+
+        <div class="control-buttons">
+            <button class="btn" onclick="controlServo(0)">0°</button>
+            <button class="btn" onclick="controlServo(45)">45°</button>
+            <button class="btn" onclick="controlServo(90)">90°</button>
+            <button class="btn" onclick="controlServo(135)">135°</button>
+            <button class="btn" onclick="controlServo(180)">180°</button>
+        </div>
+
+        <div class="status disconnected" id="status">
+            未连接到 MQTT 服务器
+        </div>
+    </div>
+
+    <script>
+        let mqttClient = null;
+        let currentAngle = 0;
+
+        const TOPIC = "202603_PP2/15";
+        function connectMQTT() {
+            const host = "yunyismart.tech";
+            const port = 9001;
+
+            if (mqttClient) {
+                mqttClient.end();
+            }
+
+            const connectUrl = `ws://${host}:${port}`;
+
+            mqttClient = mqtt.connect(connectUrl, {
+                clientId: 'servo_control_' + Math.random().toString(16).substr(2, 8),
+                clean: true,
+                reconnectPeriod: 1000,
+                connectTimeout: 30 * 1000,
+            });
+
+            mqttClient.on('connect', function () {
+                console.log('MQTT 连接成功');
+                updateStatus('已连接到 MQTT 服务器', 'connected');
+            });
+
+            mqttClient.on('error', function (err) {
+                console.error('MQTT 连接错误:', err);
+                updateStatus('MQTT 连接失败: ' + err.message, 'disconnected');
+            });
+
+            mqttClient.on('offline', function () {
+                console.log('MQTT 离线');
+                updateStatus('MQTT 连接断开', 'disconnected');
+            });
+
+            mqttClient.on('reconnect', function () {
+                console.log('MQTT 重连中...');
+                updateStatus('MQTT 重连中...', 'disconnected');
+            });
+        }
+
+        function updateStatus(message, type) {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
+        }
+
+        function controlServo(angle) {
+            if (!mqttClient || !mqttClient.connected) {
+                alert('请先连接 MQTT 服务器');
+                return;
+            }
+
+            const message = {
+                id: 10,
+                device: "servo",
+                key: "control",
+                value: angle.toString()
+            };
+
+            mqttClient.publish(TOPIC, JSON.stringify(message), function (err) {
+                if (err) {
+                    console.error('发送消息失败:', err);
+                    alert('发送消息失败: ' + err.message);
+                } else {
+                    console.log('发送消息成功:', message);
+                    updateServoDisplay(angle);
+                }
+            });
+        }
+
+        function updateServoDisplay(angle) {
+            currentAngle = angle;
+            const servoArm = document.getElementById('servoArm');
+            const rotation = angle;
+            servoArm.style.transform = `translateY(-50%) rotate(${rotation}deg)`;
+
+            // 更新状态显示
+            updateStatus(`舵机已旋转至 ${angle}°`, 'connected');
+        }
+
+        // 页面加载完成后自动连接（使用默认配置）
+        window.onload = function () {
+            // 可以在这里添加自动连接逻辑
+            connectMQTT();
+        };
+    </script>
+</body>
+
+</html>
