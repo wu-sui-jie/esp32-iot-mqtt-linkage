@@ -55,9 +55,8 @@ ProtoResult handle_device_cmd(const char *device, const char *action,
 
 void setup()
 {
-    proto_init();   // 连接 WiFi 与 MQTT（内部已 Serial.begin）
-    linkage_init(); // 静默期从此刻起算，必须在 proto_init 之后
-    tts_init();     // 打开语音模块串口，播报开机提示
+    proto_init(); // 连接 WiFi 与 MQTT（内部已 Serial.begin）
+    tts_init();   // 打开语音模块串口，播报开机提示
 }
 
 void loop()

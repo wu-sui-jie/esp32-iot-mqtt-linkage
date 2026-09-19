@@ -2,7 +2,7 @@
 #include "my_config.h"
 #include "tts.h"
 
-#include <stdarg.h> // 周期汇总的文本拼接用（appendf）
+#include <stdarg.h> // 文本拼接用（appendf：上下线合并播报与周期汇总共用）
 
 // ============================================================
 //  7 号板：本地联动播报
@@ -69,8 +69,8 @@ enum Rule
     R_TEMP,         // 温度过高
     R_HUMI,         // 湿度过高
     R_LIGHT,        // 光线过暗（阈值告警）
-    R_ONLINE,       // 设备上线
-    R_OFFLINE,      // 设备离线
+    // 上下线不用冷却槽：它们是状态变化，每块板只发生一次，
+    // 被冷却挡掉就无法补播。改用合并播报，见文件前半部分。
     R_SERVO,        // 平台命令的舵机动作
     R_COUNT
 };
@@ -132,10 +132,6 @@ struct Snapshot
 
 static Snapshot snap;
 
-// 开机静默期的起点。由 linkage_init() 在协议层初始化完成之后记录，
-// 不能用 millis() 直接算——原因见 linkage_init() 里的说明。
-static uint32_t mute_start_ms = 0;
-
 // ============================================================
 //  各板在线状态表
 //
@@ -155,7 +151,92 @@ static uint32_t mute_start_ms = 0;
 static bool board_online[9] = {false}; // 下标 1~8 对应板号，0 不用
 
 // ============================================================
+//  上下线的合并播报
+//
+//  【为什么不用冷却】上下线是"状态变化"，每块板只会发生一次，不像
+//  火焰那样每 5 秒重发、对射那样每 30 秒心跳。所以它【绝对不能丢】：
+//  被冷却挡掉的那一句，事后没有任何机会补回来。
+//
+//  上一版给上下线也套了冷却（上线 60 秒、离线 30 秒），而且是所有板
+//  共用同一个冷却槽。后果是八块板里只有第一块的上下线听得见，其余
+//  全被当成"冷却中"丢掉了——这正是"有时候不播报、等多久也没用"的原因。
+//
+//  改成合并：收到上下线先登记，等一小会儿把这一批合成一句念出来。
+//    · 八块板一起上电 → 一句"1 号、2 号、3 号…设备已上线"，不刷屏
+//    · 只有一块板动   → 一句"6 号设备已上线"，延迟短到感觉不出来
+//    · 同一块板在窗口里反复上下线 → 只播最后那个状态，天然防抖
+// ============================================================
+
+// 每块板待播的状态：0 = 没有，1 = 待播上线，2 = 待播离线。
+// 用单个数组而不是两个布尔数组，是为了让"同一块板反复上下线"时
+// 后一次直接覆盖前一次，不会同时排着"已上线"和"已离线"两句。
+static uint8_t pending_state[9] = {0};
+static uint32_t merge_since_ms = 0; // 0 = 当前没有待播的
+
+// 追加格式化。snprintf 返回的是"本应写入的长度"，可能超过剩余空间，
+// 所以这里要做钳位，否则 pos 会越过缓冲区末尾。
+static int appendf(char *buf, size_t n, int pos, const char *fmt, ...)
+{
+    if (pos >= (int)n - 1)
+        return pos;
+
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsnprintf(buf + pos, n - pos, fmt, ap);
+    va_end(ap);
+
+    if (r < 0)
+        return pos;
+
+    int room = (int)(n - pos) - 1;
+    return pos + (r < room ? r : room);
+}
+
+// 把待播的某一类（上线或离线）板号拼成一句："3 号、5 号设备已上线"。
+// 这一类一条都没有就什么都不做。
+static void say_group(uint8_t want, const char *suffix, uint8_t level)
+{
+    char text[TTS_TEXT_MAX];
+    int pos = 0;
+    bool any = false;
+
+    for (int b = 1; b <= 8; b++)
+    {
+        if (pending_state[b] != want)
+            continue;
+        pending_state[b] = 0;
+
+        if (any)
+            pos = appendf(text, sizeof(text), pos, "、");
+        pos = appendf(text, sizeof(text), pos, "%d 号", b);
+        any = true;
+    }
+
+    if (!any)
+        return;
+
+    pos = appendf(text, sizeof(text), pos, "设备%s", suffix);
+    text[sizeof(text) - 1] = '\0';
+
+    tts_say(text, level);
+}
+
+// 合并窗口到了：把这一批上下线播出来
+static void flush_board_events()
+{
+    merge_since_ms = 0;
+
+    // 先念上线的，再念离线的。一批里有的上、有的下这种情形很少见，
+    // 真遇上时分开两句也比混在一句里更容易听懂。
+    say_group(1, "已上线", TTS_LEVEL_INFO);
+    say_group(2, "已离线", TTS_LEVEL_WARN);
+}
+
+// ============================================================
 //  sys：设备上下线（发布在 online 主题，Retain）
+//
+//  这里只更新状态、把变化登记下来。真正的播报在 linkage_loop() 里
+//  合并之后做——理由见上面"合并播报"那一段。
 // ============================================================
 static void on_sys(const char *src, JsonObjectConst body)
 {
@@ -168,30 +249,15 @@ static void on_sys(const char *src, JsonObjectConst body)
         return;
     }
 
+    uint8_t want;
+
     if (strcmp(ev, "online") == 0)
     {
-        bool was_online = board_online[board];
-        board_online[board] = true; // 状态一定要更新，播不播是另一回事
-
-        if (was_online)
-        {
-            Serial.printf("[link] %d 号板重复的 online，不播报\n", board);
-            return;
-        }
-
-        // 开机静默期：冷启动订阅之后，服务器会把当前在线的板一股脑
-        // 推过来，不屏蔽的话开机就是一串"X 号设备已上线"。
-        // 【只挡播报，不挡上面那句状态更新】否则静默期内上线的板在表里
-        // 仍然记成离线，之后它真掉线时会被当成"旧报文"而不播。
-        if (millis() - mute_start_ms < ONLINE_MUTE_MS)
-        {
-            Serial.printf("[link] 静默期内，%d 号板上线只记录不播报\n", board);
-            return;
-        }
-
-        char text[48];
-        snprintf(text, sizeof(text), "%d 号设备已上线", board);
-        say_rule(R_ONLINE, text, TTS_LEVEL_INFO);
+        if (board_online[board])
+            return; // 重复的 online：QoS 1 重投递，或服务器重推的保留报文
+        board_online[board] = true;
+        want = 1;
+        Serial.printf("[link] %d 号设备上线\n", board);
     }
     else if (strcmp(ev, "offline") == 0)
     {
@@ -204,11 +270,17 @@ static void on_sys(const char *src, JsonObjectConst body)
             return;
         }
         board_online[board] = false;
-
-        char text[48];
-        snprintf(text, sizeof(text), "%d 号设备已离线", board);
-        say_rule(R_OFFLINE, text, TTS_LEVEL_WARN);
+        want = 2;
+        Serial.printf("[link] %d 号设备离线\n", board);
     }
+    else
+    {
+        return; // 本版本只定义了 online / offline 两个 sys 事件
+    }
+
+    pending_state[board] = want;
+    if (merge_since_ms == 0)
+        merge_since_ms = millis();
 }
 
 // ============================================================
@@ -433,25 +505,6 @@ static void on_ack(JsonObjectConst body)
 
 static uint32_t last_summary_ms = 0;
 
-// 追加格式化。snprintf 返回的是"本应写入的长度"，
-// 可能超过剩余空间，所以这里要做钳位，否则 pos 会越过缓冲区末尾。
-static int appendf(char *buf, size_t n, int pos, const char *fmt, ...)
-{
-    if (pos >= (int)n - 1)
-        return pos;
-
-    va_list ap;
-    va_start(ap, fmt);
-    int r = vsnprintf(buf + pos, n - pos, fmt, ap);
-    va_end(ap);
-
-    if (r < 0)
-        return pos;
-
-    int room = (int)(n - pos) - 1;
-    return pos + (r < room ? r : room);
-}
-
 // 26.0 → "26"；26.5 → "26.5"。
 // 语音模块念"二十六点零度"很别扭，整数就别带小数位。
 static void fmt_num(char *buf, size_t n, float v)
@@ -536,21 +589,6 @@ static void summary_tick()
 // ============================================================
 //  入口
 // ============================================================
-void linkage_init()
-{
-    // 静默期的起点。必须在 setup() 里 proto_init() 【之后】调用。
-    //
-    // 不能拿 millis() 直接和 ONLINE_MUTE_MS 比：proto_init() 里要先连
-    // WiFi、再连 MQTT、最后订阅主题，这一段在现场可能要十几秒。从芯片
-    // 上电算起的话，连接慢的时候静默期会在订阅建立之前就整段用完，
-    // 等于没设——而订阅一建立，服务器立刻就会把当前在线的板全推过来，
-    // 正是要屏蔽的那一批。
-    mute_start_ms = millis();
-
-    Serial.printf("[link] 静默期起算：%lu 秒内不播报设备上线\n",
-                  ONLINE_MUTE_MS / 1000);
-}
-
 void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
 {
 #if TTS_LOCAL_LINKAGE
@@ -571,6 +609,14 @@ void linkage_on_message(const char *type, const char *src, JsonObjectConst body)
 
 void linkage_loop()
 {
+#if TTS_LOCAL_LINKAGE
+    // 待合并的上下线：窗口到了就播出去。
+    // 放在主循环而不是消息回调里，是因为回调里不能 publish，
+    // 而合并本身也需要"等一小会儿看还有没有下一块板"。
+    if (merge_since_ms != 0 && millis() - merge_since_ms >= BOARD_EVENT_MERGE_MS)
+        flush_board_events();
+#endif
+
 #if TTS_LOCAL_LINKAGE && TTS_SUMMARY_ENABLE
     summary_tick();
 #endif
