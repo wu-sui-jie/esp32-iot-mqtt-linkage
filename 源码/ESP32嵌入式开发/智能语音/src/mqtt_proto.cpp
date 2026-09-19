@@ -300,8 +300,8 @@ static void flush_pending()
 // ============================================================
 static void proto_connect()
 {
-    // 客户端编号全局唯一：esp32- + MAC（协议 §8.4）
-    String cid = "esp32-" + WiFi.macAddress();
+    // 客户端编号全局唯一：esp32- + 板号 + MAC（协议 §8.4 建议的格式）
+    String cid = "esp32-" + String(BOARD_ID) + "-" + WiFi.macAddress();
 
     // 遗嘱消息：本板掉线时由服务器代发 sys/offline
     // 必须在 connect 之前设置（协议 §6，且库要求如此）
@@ -407,4 +407,30 @@ bool proto_send_dat(const char *device)
 
     // 协议 §8.2：report 的周期数据用 QoS 0，不保留
     return publish_doc(dat_doc, TOPIC_REPORT, false, 0);
+}
+
+// ============================================================
+//  事件上报（type = evt，QoS 1）
+//
+//  与 dat 分开用一份文档：evt 是状态跳变这一类必须送达的报文，
+//  不能被随后的周期数据覆盖掉。两份文档各自独立，互不干扰。
+// ============================================================
+static StaticJsonDocument<256> evt_doc;
+
+bool proto_send_evt(const char *device, const char *event, int level)
+{
+    evt_doc.clear();
+    evt_doc["ver"] = PROTO_VER;
+    evt_doc["type"] = "evt";
+    evt_doc["seq"] = next_seq();
+    evt_doc["src"] = BOARD_ID_STR;
+    evt_doc["dst"] = 0;
+
+    JsonObject b = evt_doc.createNestedObject("body");
+    b["device"] = device;
+    b["event"] = event;
+    b["level"] = level;
+
+    // 协议表 18：report 的事件与回执用 QoS 1，不保留
+    return publish_doc(evt_doc, TOPIC_REPORT, false, 1);
 }

@@ -97,3 +97,15 @@ bool proto_connected();
 // ============================================================
 JsonArray proto_dat_samples();
 bool proto_send_dat(const char *device);
+
+// ============================================================
+//  事件上报（type = evt）
+//
+//  用法：
+//      proto_send_evt("ir_beam", "blocked", 2);
+//
+//  level 为事件等级 0~3（协议表 5）：0 恢复、1 提示、2 警告、3 紧急。
+//  协议表 18 规定 evt 与 ack 一样用 QoS 1，不允许丢失。
+//  上报周期与去抖参数见协议表 19。
+// ============================================================
+bool proto_send_evt(const char *device, const char *event, int level);

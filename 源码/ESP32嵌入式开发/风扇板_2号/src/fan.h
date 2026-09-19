@@ -1,0 +1,23 @@
+#pragma once
+
+#include <Arduino.h>
+#include "my_config.h"
+
+#if HAS_FAN
+
+// ============================================================
+//  2 号板：继电器（风扇）模块
+//
+//  协议表 9：下行 set_power{"on":true/false}，上行 ack 回发当前状态。
+// ============================================================
+
+// 上电初始化：配置 PWM 通道，风扇从停止状态开始
+void fan_init();
+
+// 开 / 关风扇。on = true 全速，on = false 停止
+void fan_set_power(bool on);
+
+// 当前开关状态，用于回执时回发实际状态（协议表 9）
+bool fan_is_on();
+
+#endif
