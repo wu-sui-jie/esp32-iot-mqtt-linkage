@@ -120,17 +120,28 @@ static void say_rule(Rule r, const char *text, uint8_t level)
 // ============================================================
 struct Snapshot
 {
-    bool has_temp, has_humi, has_lux; // 是否收到过这一类数据
+    // 每个数据源最后一次收到数据的时刻，0 表示从来没收到过。
+    //
+    // 【为什么记时刻而不是只记一个"收到过"的标记】设备关掉之后不再上报，
+    // 只记标记的话它会永远停在"收到过"，汇总播报就会继续念一块已经断电的
+    // 板子最后一次报上来的数据，听起来像它还在工作。
+    // 有了时刻就能判断数据还新不新鲜，不新鲜就把这一项从汇总里去掉。
+    uint32_t temp_ms, humi_ms, lux_ms, ir_ms, flame_ms;
+
     float temp, humi, lux;
 
-    bool has_ir;      // 是否收到过对射的状态
-    bool ir_blocked;  // true = 遮挡
-
-    bool has_flame;    // 是否收到过火焰的状态
+    bool ir_blocked;   // true = 对射被遮挡
     bool flame_alarm;  // true = 正在报火焰
 };
 
 static Snapshot snap;
+
+// 这条数据还算新鲜吗？
+// 超时窗口按各模块自己的上报周期在 my_config.h 里定。
+static bool snap_valid(uint32_t last_ms, uint32_t timeout_ms)
+{
+    return last_ms != 0 && (millis() - last_ms) < timeout_ms;
+}
 
 // ============================================================
 //  各板在线状态表
@@ -345,13 +356,13 @@ static void on_evt(JsonObjectConst body)
     if (strcmp(device, "flame") == 0)
     {
         // 先更新快照，再走播报逻辑
-        snap.has_flame = true;
+        snap.flame_ms = millis();
         snap.flame_alarm = (strcmp(ev, "detected") == 0);
         on_evt_flame(ev);
     }
     else if (strcmp(device, "ir_beam") == 0)
     {
-        snap.has_ir = true;
+        snap.ir_ms = millis();
         snap.ir_blocked = (strcmp(ev, "blocked") == 0);
 
         if (strcmp(ev, "blocked") == 0)
@@ -410,7 +421,7 @@ static void on_dat(JsonObjectConst body)
         {
             if (strcmp(key, "temperature") == 0)
             {
-                snap.has_temp = true;
+                snap.temp_ms = millis();
                 snap.temp = val;
 
                 if (val >= TEMP_HIGH)
@@ -422,7 +433,7 @@ static void on_dat(JsonObjectConst body)
             }
             else if (strcmp(key, "humidity") == 0)
             {
-                snap.has_humi = true;
+                snap.humi_ms = millis();
                 snap.humi = val;
 
                 if (val >= HUMI_HIGH)
@@ -437,7 +448,7 @@ static void on_dat(JsonObjectConst body)
         {
             if (strcmp(key, "illuminance") == 0)
             {
-                snap.has_lux = true;
+                snap.lux_ms = millis();
                 snap.lux = val;
 
                 if (val < LIGHT_LOW)
@@ -527,31 +538,36 @@ static void build_summary(char *out, size_t n)
     char num[16];
     int pos = 0;
 
+    // 先判断"哪几项还新鲜"。设备关掉之后不再上报，对应的时间戳就不再
+    // 刷新，超过窗口它的那一项会自动从句子里消失，不会一直念旧数据。
+    bool has_temp = snap_valid(snap.temp_ms, SNAP_TIMEOUT_SHT30_MS);
+    bool has_humi = snap_valid(snap.humi_ms, SNAP_TIMEOUT_SHT30_MS);
+
     pos = appendf(out, n, pos, "环境汇总");
 
-    if (snap.has_temp && snap.has_humi)
+    if (has_temp && has_humi)
     {
         fmt_num(num, sizeof(num), snap.temp);
         pos = appendf(out, n, pos, "，温度%s度，湿度%d%%",
                       num, (int)(snap.humi + 0.5f));
     }
-    else if (snap.has_temp)
+    else if (has_temp)
     {
         fmt_num(num, sizeof(num), snap.temp);
         pos = appendf(out, n, pos, "，温度%s度", num);
     }
-    else if (snap.has_humi)
+    else if (has_humi)
     {
         pos = appendf(out, n, pos, "，湿度%d%%", (int)(snap.humi + 0.5f));
     }
 
-    if (snap.has_lux)
+    if (snap_valid(snap.lux_ms, SNAP_TIMEOUT_LIGHT_MS))
         pos = appendf(out, n, pos, "，光照%d勒克斯", (int)(snap.lux + 0.5f));
 
-    if (snap.has_ir)
+    if (snap_valid(snap.ir_ms, SNAP_TIMEOUT_IR_MS))
         pos = appendf(out, n, pos, "，对射%s", snap.ir_blocked ? "遮挡" : "通畅");
 
-    if (snap.has_flame)
+    if (snap_valid(snap.flame_ms, SNAP_TIMEOUT_FLAME_MS))
         pos = appendf(out, n, pos, "，火焰%s", snap.flame_alarm ? "报警" : "正常");
 
     out[n - 1] = '\0';
@@ -562,8 +578,14 @@ static void summary_tick()
     if (millis() - last_summary_ms < SUMMARY_PERIOD_MS)
         return;
 
-    // 一条数据都没收到就先不播（刚上电时其他板还没起来）
-    if (!snap.has_temp && !snap.has_humi && !snap.has_lux && !snap.has_ir && !snap.has_flame)
+    // 一条新鲜数据都没有就先不播：刚上电时其他板还没起来，
+    // 或者所有传感器板都关掉了。
+    bool any = snap_valid(snap.temp_ms, SNAP_TIMEOUT_SHT30_MS) ||
+               snap_valid(snap.humi_ms, SNAP_TIMEOUT_SHT30_MS) ||
+               snap_valid(snap.lux_ms, SNAP_TIMEOUT_LIGHT_MS) ||
+               snap_valid(snap.ir_ms, SNAP_TIMEOUT_IR_MS) ||
+               snap_valid(snap.flame_ms, SNAP_TIMEOUT_FLAME_MS);
+    if (!any)
     {
         last_summary_ms = millis(); // 等下一个周期再看
         return;
