@@ -2,6 +2,7 @@
 #include "my_config.h"
 #include "mqtt_proto.h"
 #include "tts.h"
+#include "linkage.h"
 
 // ============================================================
 //  7 号板：智能语音播报模块（执行器）
@@ -9,7 +10,9 @@
 //  本模块有两条播报来源，都在这里汇合：
 //    路径 A  平台下发 —— 本文件的 handle_device_cmd()
 //    路径 B  本地联动 —— linkage.cpp，报文经 proto_on_other() 进来
-//  两条最终都调 tts_say() 排队，由 tts_loop() 统一下发（readme 第一节）。
+//  两条最终都调 tts_say() 排队，由 tts_loop() 统一下发。
+//
+//  linkage.cpp 内部又分三层：事件即时播报、阈值告警、周期数据汇总。
 // ============================================================
 
 ProtoResult handle_device_cmd(const char *device, const char *action,
@@ -58,6 +61,7 @@ void setup()
 
 void loop()
 {
-    proto_loop(); // MQTT 收发 + 回执
-    tts_loop();   // 播报队列在这里真正下发，回调里只入队
+    proto_loop();   // MQTT 收发 + 回执
+    tts_loop();     // 播报队列在这里真正下发，回调里只入队
+    linkage_loop(); // 第三层：周期数据汇总（空闲时播）
 }
