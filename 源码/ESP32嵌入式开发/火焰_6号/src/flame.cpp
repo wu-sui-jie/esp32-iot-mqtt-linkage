@@ -22,8 +22,7 @@
 // ============================================================
 
 // ---------------- 状态 ----------------
-static int base1 = 0; // IO33 的无火基线
-static int base2 = 0; // IO32 的无火基线
+static int base = 0; // AO 的无火基线
 
 static bool raw_last = false;             // 上一次的原始判定（去抖用）
 static bool flame_state = false;          // 去抖确认后的状态
@@ -37,19 +36,15 @@ static unsigned long last_dat_ms = 0;       // 最近一次上报强度
 static int last_intensity = 0; // 最近一次的强度原始值
 
 // ============================================================
-//  读两路 AO，返回"偏离基线更大"的那一路的原始读数
+//  读 AO，返回原始读数；偏离基线多少写进 *out_diff
+//  引脚在 my_config.h 里（原理图确认是 IO33）
 // ============================================================
-static int read_active_ao(int *out_diff)
+static int read_ao(int *out_diff)
 {
-    int a1 = analogRead(PIN_FLAME_AO_1);
-    int a2 = analogRead(PIN_FLAME_AO_2);
-    int d1 = abs(a1 - base1);
-    int d2 = abs(a2 - base2);
-
+    int a = analogRead(PIN_FLAME_AO);
     if (out_diff)
-        *out_diff = (d1 >= d2) ? d1 : d2;
-
-    return (d1 >= d2) ? a1 : a2;
+        *out_diff = abs(a - base);
+    return a;
 }
 
 // ============================================================
@@ -64,22 +59,20 @@ static void calibrate()
     Serial.printf("[flame] AO 基线校准中（请勿点火），%lu 毫秒...\n",
                   (unsigned long)FLAME_CALIBRATE_MS);
 
-    long s1 = 0, s2 = 0;
+    long sum = 0;
     int n = 0;
     unsigned long t0 = millis();
     while (millis() - t0 < FLAME_CALIBRATE_MS)
     {
-        s1 += analogRead(PIN_FLAME_AO_1);
-        s2 += analogRead(PIN_FLAME_AO_2);
+        sum += analogRead(PIN_FLAME_AO);
         n++;
         delay(20);
     }
 
-    base1 = (int)(s1 / n);
-    base2 = (int)(s2 / n);
+    base = (int)(sum / n);
 
-    Serial.printf("[flame] 基线 IO%d=%d  IO%d=%d  判定阈值=%d\n",
-                  PIN_FLAME_AO_1, base1, PIN_FLAME_AO_2, base2, FLAME_THRESHOLD);
+    Serial.printf("[flame] 基线 IO%d=%d  判定阈值=%d\n",
+                  PIN_FLAME_AO, base, FLAME_THRESHOLD);
 }
 
 // ============================================================
@@ -90,7 +83,7 @@ static void scan()
     unsigned long now = millis();
 
     int diff = 0;
-    int ao = read_active_ao(&diff);
+    int ao = read_ao(&diff);
     bool raw = (diff > FLAME_THRESHOLD); // 偏离超过阈值 = 有火焰
 
     // ---- 去抖：原始判定变化后重新计时 ----
@@ -142,7 +135,7 @@ static void scan()
 static void report_intensity()
 {
     int diff = 0;
-    int ao = read_active_ao(&diff);
+    int ao = read_ao(&diff);
     last_intensity = ao;
 
     JsonArray samples = proto_dat_samples();
@@ -167,7 +160,7 @@ void flame_init()
 
     // 校准结束后用当前读数初始化状态，避免上电瞬间误报
     int diff = 0;
-    read_active_ao(&diff);
+    read_ao(&diff);
     raw_last = flame_state = (diff > FLAME_THRESHOLD);
 
     last_dat_ms = millis();
