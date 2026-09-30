@@ -27,13 +27,13 @@
 // 【注意】这里叫 WIFI_SSID / WIFI_PASSWORD，不叫协议附录 A 里写的
 // SSID / PASSWORD。原因是宏名会全局替换：ESP32 的 WiFi.h 里有
 // 一个方法就叫 SSID()，一旦 #define SSID "..."，那行声明会被替换成
-//     String "wusuijie"() const;
+//     String "Kris"() const;
 // 直接编译报错 "expected unqualified-id before string constant"。
 // 课堂例程没踩到，是因为它们把 #include <WiFi.h> 写在了
 // #include "my_config.h" 前面；而本工程的 mqtt_proto.h 是先包含
 // my_config.h 的，所以必须改名，不能靠包含顺序。
-#define WIFI_SSID     "wusuijie"        // WiFi账号
-#define WIFI_PASSWORD "11111111"        // WiFi密码
+#define WIFI_SSID     "wusuijie"              // WiFi账号
+#define WIFI_PASSWORD "11111111"         // WiFi密码
 #define MQTT_SERVER   "yunyismart.tech" // MQTT服务器地址
 #define MQTT_PORT     1883              // MQTT服务器端口号
 

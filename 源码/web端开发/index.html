@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>物联网多平台联动系统 · 第1组 Web 控制台</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+
+<body>
+
+    <header>
+        <h1>物联网多平台联动系统 · Web 控制台</h1>
+        <p class="subtitle">MQTT 协议 V2.0 | 服务器 yunyismart.tech:9001 (WebSocket)</p>
+        <p class="members">小组成员：李豪 · 施昱名 · 吴遂杰 · 吴一凡</p>
+    </header>
+
+    <!-- 连接状态栏 -->
+    <div class="status-bar">
+        <span id="status" class="status-offline">未连接</span>
+        <span class="msg-box">最近消息: <input type="text" id="msg" size="60" readonly></span>
+    </div>
+
+    <!-- 设备在线状态 -->
+    <section class="online-section">
+        <h2>设备在线状态</h2>
+        <div class="online-grid" id="onlineGrid">
+            <!-- 由 JS 动态填充 -->
+        </div>
+    </section>
+
+    <!-- 八块设备卡片 -->
+    <section class="panel">
+
+        <!-- 1号板：舵机 servo（执行器） -->
+        <div class="card" id="card-servo">
+            <h3>1号 · 舵机 <span class="badge actuator">执行器</span></h3>
+            <div class="servo-display">
+                <div class="servo-arm" id="servoArm"></div>
+                <div class="servo-angle" id="servoAngleText">90°</div>
+            </div>
+            <div class="control-row">
+                <label>角度: <input type="range" id="servoSlider" min="0" max="180" value="90"></label>
+                <button class="btn-send" onclick="cmdServoAngle()">设定</button>
+            </div>
+            <p class="dev-text" id="servoStatus">等待数据...</p>
+        </div>
+
+        <!-- 2号板：风扇 fan（执行器） -->
+        <div class="card" id="card-fan">
+            <h3>2号 · 风扇 <span class="badge actuator">执行器</span></h3>
+            <div class="fan-display" id="fanDisplay">
+                <div class="fan-center"></div>
+                <div class="fan-blades">
+                    <div class="fan-blade"></div>
+                    <div class="fan-blade"></div>
+                    <div class="fan-blade"></div>
+                </div>
+            </div>
+            <p class="dev-text" id="fanText">关</p>
+            <div class="control-row">
+                <button class="btn-on" onclick="cmdFanPower(true)">开</button>
+                <button class="btn-off" onclick="cmdFanPower(false)">关</button>
+            </div>
+        </div>
+
+        <!-- 3号板：红外对射 ir_beam（传感器） -->
+        <div class="card" id="card-irbeam">
+            <h3>3号 · 红外对射 <span class="badge sensor">传感器</span></h3>
+            <div class="ir-status" id="irStatus">通畅</div>
+            <p class="dev-text">遮挡次数: <span id="irCount">0</span></p>
+            <p class="dev-text" id="irTime">等待数据...</p>
+        </div>
+
+        <!-- 4号板：温湿度 sht30（传感器） -->
+        <div class="card" id="card-sht30">
+            <h3>4号 · 温湿度 <span class="badge sensor">传感器</span></h3>
+            <div class="sensor-values">
+                <div class="sensor-item">
+                    <span class="sensor-icon">🌡</span>
+                    <span class="sensor-num" id="tempVal">--</span>
+                    <span class="sensor-unit">℃</span>
+                </div>
+                <div class="sensor-item">
+                    <span class="sensor-icon">💧</span>
+                    <span class="sensor-num" id="humiVal">--</span>
+                    <span class="sensor-unit">%</span>
+                </div>
+            </div>
+            <div class="temp-bar-wrap">
+                <div class="bar-label">温度</div>
+                <div class="bar-track"><div class="bar-fill temp-fill" id="tempFill"></div></div>
+            </div>
+            <div class="temp-bar-wrap">
+                <div class="bar-label">湿度</div>
+                <div class="bar-track"><div class="bar-fill humi-fill" id="humiFill"></div></div>
+            </div>
+            <p class="dev-text" id="sht30Time">等待数据...</p>
+        </div>
+
+        <!-- 5号板：RGB + 蜂鸣器（综合） -->
+        <div class="card" id="card-rgb">
+            <h3>5号 · RGB/蜂鸣器 <span class="badge combined">综合</span></h3>
+            <div class="rgb-preview" id="rgbPreview"></div>
+            <div class="control-row">
+                <label>R:<input type="range" id="rgbR" min="0" max="255" value="0"></label>
+                <label>G:<input type="range" id="rgbG" min="0" max="255" value="0"></label>
+                <label>B:<input type="range" id="rgbB" min="0" max="255" value="0"></label>
+            </div>
+            <button class="btn-send" onclick="cmdRgbColor()">设定颜色</button>
+            <hr>
+            <div class="buzzer-row">
+                <span>蜂鸣器: <strong id="buzzerText">关</strong></span>
+                <button class="btn-on" onclick="cmdBuzzerPower(true)">开</button>
+                <button class="btn-off" onclick="cmdBuzzerPower(false)">关</button>
+            </div>
+        </div>
+
+        <!-- 6号板：火焰 flame（传感器） -->
+        <div class="card" id="card-flame">
+            <h3>6号 · 火焰 <span class="badge sensor">传感器</span></h3>
+            <div class="flame-icon" id="flameIcon">🔥</div>
+            <div class="flame-status" id="flameStatus">正常</div>
+            <div class="temp-bar-wrap">
+                <div class="bar-label">强度</div>
+                <div class="bar-track"><div class="bar-fill flame-fill" id="flameFill"></div></div>
+            </div>
+            <p class="dev-text" id="flameVal">强度: --</p>
+            <p class="dev-text" id="flameTime">等待数据...</p>
+        </div>
+
+        <!-- 7号板：语音播报 tts（执行器） -->
+        <div class="card card-wide" id="card-tts">
+            <h3>7号 · 语音播报 <span class="badge actuator">执行器</span></h3>
+            <div class="tts-input-row">
+                <input type="text" id="ttsText" placeholder="输入播报文本（最长100字节）" maxlength="100">
+                <button class="btn-send" onclick="cmdTtsPlay()">播报</button>
+            </div>
+            <p class="dev-text" id="ttsStatus">等待操作...</p>
+        </div>
+
+        <!-- 8号板：光照度 light_sensor（传感器） -->
+        <div class="card" id="card-light">
+            <h3>8号 · 光照度 <span class="badge sensor">传感器</span></h3>
+            <div class="light-icon" id="lightIcon">🌑</div>
+            <div class="light-value"><span id="lightVal">--</span> lx</div>
+            <div class="temp-bar-wrap">
+                <div class="bar-track"><div class="bar-fill light-fill" id="lightFill"></div></div>
+            </div>
+            <p class="dev-text" id="lightLevel">等待数据...</p>
+        </div>
+
+    </section>
+
+    <!-- 联动调试面板 -->
+    <section class="linkage-section">
+        <h2>联动调试面板</h2>
+        <p class="section-desc">模拟传感器数据，触发板端本地联动效果（向 report 主题发布模拟报文）</p>
+        <div class="linkage-grid">
+
+            <!-- 联动1：火焰 → RGB + 蜂鸣器 -->
+            <div class="linkage-card fire">
+                <div class="linkage-header">
+                    <span class="linkage-icon">🔥</span>
+                    <div>
+                        <h4>火焰 → RGB + 蜂鸣器</h4>
+                        <span class="linkage-path">6号(火焰) → 5号(RGB/蜂鸣器)</span>
+                    </div>
+                </div>
+                <p class="linkage-desc">模拟火焰检测事件，触发5号板多彩循环灯光 + 蜂鸣器间歇报警</p>
+                <div class="linkage-btns">
+                    <button class="btn-link btn-danger" onclick="simFlame(true)">模拟火焰检测</button>
+                    <button class="btn-link btn-safe" onclick="simFlame(false)">模拟火焰消失</button>
+                </div>
+            </div>
+
+            <!-- 联动2：红外对射 → 舵机 -->
+            <div class="linkage-card ir">
+                <div class="linkage-header">
+                    <span class="linkage-icon">📡</span>
+                    <div>
+                        <h4>红外对射 → 舵机</h4>
+                        <span class="linkage-path">3号(对射) → 1号(舵机)</span>
+                    </div>
+                </div>
+                <p class="linkage-desc">模拟光束遮挡事件，触发1号板舵机自动转到遮挡位（0°），恢复后回到90°</p>
+                <div class="linkage-btns">
+                    <button class="btn-link btn-warn" onclick="simIrBeam(true)">模拟光束遮挡</button>
+                    <button class="btn-link btn-safe" onclick="simIrBeam(false)">模拟光束恢复</button>
+                </div>
+            </div>
+
+            <!-- 联动3：温湿度 → 风扇 -->
+            <div class="linkage-card temp">
+                <div class="linkage-header">
+                    <span class="linkage-icon">🌡</span>
+                    <div>
+                        <h4>温湿度 → 风扇</h4>
+                        <span class="linkage-path">4号(温湿度) → 2号(风扇)</span>
+                    </div>
+                </div>
+                <p class="linkage-desc">模拟温湿度超标数据，触发2号板自动开启风扇（温度≥30℃ 或 湿度≥80%）</p>
+                <div class="linkage-btns">
+                    <button class="btn-link btn-warm" onclick="simTempHumi(true)">模拟高温高湿</button>
+                    <button class="btn-link btn-safe" onclick="simTempHumi(false)">模拟正常环境</button>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- 消息日志 -->
+    <section class="log-section">
+        <h2>消息日志 <button class="btn-small" onclick="clearLog()">清空</button></h2>
+        <div class="log-box" id="logBox"></div>
+    </section>
+
+    <footer>
+        <p>苏州城市学院 · 物联网项目实践 · 第1组 | 实现: 李豪 2306443053</p>
+    </footer>
+
+</body>
+
+</html>

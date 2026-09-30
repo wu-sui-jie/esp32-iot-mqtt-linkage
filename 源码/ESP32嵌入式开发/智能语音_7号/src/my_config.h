@@ -26,8 +26,8 @@
 // 课堂例程没踩到，是因为它把 #include <WiFi.h> 写在了
 // #include "my_config.h" 前面；而本工程的 mqtt_proto.h 是先包含
 // my_config.h 的，所以必须改名，不能靠包含顺序。
-#define WIFI_SSID     "wusuijie"        // WiFi账号
-#define WIFI_PASSWORD "11111111"        // WiFi密码
+#define WIFI_SSID     "wusuijie"              // WiFi账号
+#define WIFI_PASSWORD "11111111"         // WiFi密码
 #define MQTT_SERVER   "yunyismart.tech" // MQTT服务器地址
 #define MQTT_PORT     1883              // MQTT服务器端口号
 
